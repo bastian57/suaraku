@@ -134,7 +134,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                     Text("Tentang", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "SuaraKu v1.0.0 (versionCode 1)\nby DAFTECH\n\n" +
+                        "SuaraKu v1.0.1 (versionCode 2)\nby DAFTECH\n\n" +
                             "Aplikasi text-to-voice pribadi: Gemini Ekspresif (online, key sendiri), " +
                             "Edge Gratis (tidak resmi, bisa berubah), dan Offline (Piper AI di HP / TTS sistem).\n\n" +
                             "Pemakaian pribadi — tidak dijual, tanpa lisensi aktivasi, tanpa iklan.",
