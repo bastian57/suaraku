@@ -21,6 +21,21 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Pasang keystore debug TETAP (dari secret KEYSTORE_B64)
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          set -e
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "ERROR: Secret KEYSTORE_B64 belum diset - build dibatalkan supaya signature tidak acak lagi"
+            exit 1
+          fi
+          mkdir -p "$HOME/.android"
+          echo "$KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
+          test -s "$HOME/.android/debug.keystore"
+          echo "Keystore tetap terpasang:"
+          keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | grep -i "SHA256:" || true
+
       - name: Set up Android SDK (manual cmdline-tools, NO setup-android (broken))
         run: |
           set -e
@@ -62,8 +77,10 @@ jobs:
           set -e
           gradle assembleDebug 2>&1 | tee build.log
           ls -lh app/build/outputs/apk/debug/
-          cp app/build/outputs/apk/debug/app-debug.apk SuaraKu-v1.0.0.apk
-          ls -lh SuaraKu-v1.0.0.apk build.log
+          V=$(grep -oP "versionName '\\K[^']+" app/build.gradle | head -1)
+          echo "Versi dari build.gradle: $V"
+          cp app/build/outputs/apk/debug/app-debug.apk "SuaraKu-v${V}.apk"
+          ls -lh "SuaraKu-v${V}.apk" build.log
 
       - name: Upload build.log (SELALU, walau build gagal)
         if: always()
@@ -84,5 +101,7 @@ jobs:
         run: |
           set -e
           gh release view latest > /dev/null 2>&1 || gh release create latest --title "latest" --notes "Rolling latest build - SuaraKu"
-          gh release upload latest SuaraKu-v1.0.0.apk --clobber
+          V=$(grep -oP "versionName '\\K[^']+" app/build.gradle | head -1)
+          gh release upload latest "SuaraKu-v${V}.apk" --clobber
+          gh release delete-asset latest SuaraKu-v1.0.0.apk 2>/dev/null || true
           echo "UPLOAD OK"

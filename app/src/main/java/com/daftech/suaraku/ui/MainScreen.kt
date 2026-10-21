@@ -232,7 +232,7 @@ fun MainScreen(onOpenSettings: () -> Unit) {
             }
             Spacer(Modifier.height(12.dp))
             Text(
-                "SuaraKu v1.0.1 — by DAFTECH • pemakaian pribadi",
+                "SuaraKu v1.0.2 — by DAFTECH • pemakaian pribadi",
                 style = MaterialTheme.typography.bodySmall, color = SkTextDim
             )
         }
