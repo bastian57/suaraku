@@ -123,7 +123,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 )
                 ExposedDropdownMenu(expanded = engineExpanded, onDismissRequest = { engineExpanded = false }) {
                     engines.forEach { (id, label) ->
-                        DropdownMenuItem(text = { Text(label) }, onClick = { selectedEngine = id; vm.setEngine(id); engineExpanded = false })
+                        DropdownMenuItem(text = { Text(label) }, onClick = { selectedEngine = id; vm.selectEngine(id); engineExpanded = false })
                     }
                 }
             }

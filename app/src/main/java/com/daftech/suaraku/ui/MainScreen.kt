@@ -273,17 +273,17 @@ private fun GeneratorTab(vm: AppViewModel, controller: PlayerController, onImpor
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         FilterChip(
             selected = vm.engine == Prefs.ENGINE_GEMINI,
-            onClick = { vm.setEngine(Prefs.ENGINE_GEMINI) },
+            onClick = { vm.selectEngine(Prefs.ENGINE_GEMINI) },
             label = { Text("Gemini Ekspresif") }
         )
         FilterChip(
             selected = vm.engine == Prefs.ENGINE_EDGE,
-            onClick = { vm.setEngine(Prefs.ENGINE_EDGE) },
+            onClick = { vm.selectEngine(Prefs.ENGINE_EDGE) },
             label = { Text("Edge Gratis") }
         )
         FilterChip(
             selected = vm.engine == Prefs.ENGINE_OFFLINE,
-            onClick = { vm.setEngine(Prefs.ENGINE_OFFLINE) },
+            onClick = { vm.selectEngine(Prefs.ENGINE_OFFLINE) },
             label = { Text("Offline") }
         )
     }
