@@ -63,7 +63,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         modelReady = SherpaTtsEngine.isReady(ctx)
     }
 
-    fun setEngine(e: String) {
+    fun selectEngine(e: String) {
         engine = e
         prefs.defaultEngine = e
     }
