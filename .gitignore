@@ -1,0 +1,8 @@
+.gradle/
+build/
+app/build/
+local.properties
+*.iml
+.idea/
+# AAR sherpa-onnx (48 MB) TIDAK masuk repo — diunduh workflow CI sebelum build.
+app/libs/*.aar

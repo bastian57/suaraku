@@ -1,0 +1,88 @@
+name: SuaraKu Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK (manual cmdline-tools, NO setup-android (broken))
+        run: |
+          set -e
+          export ANDROID_HOME="$HOME/android-sdk"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          cd /tmp
+          curl -sL -o cmdtools.zip "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+          unzip -q -o cmdtools.zip -d "$ANDROID_HOME/cmdline-tools"
+          mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+
+      - name: Install Gradle 8.7 (AGP 8.5.2 butuh min Gradle 8.7)
+        run: |
+          set -e
+          cd /tmp
+          curl -sL -o gradle-8.7-bin.zip "https://services.gradle.org/distributions/gradle-8.7-bin.zip"
+          unzip -q -o gradle-8.7-bin.zip
+          echo "/tmp/gradle-8.7/bin" >> "$GITHUB_PATH"
+          /tmp/gradle-8.7/bin/gradle --version | head -n 5
+
+      - name: Download sherpa-onnx AAR v1.13.8 (untuk engine Offline Piper)
+        run: |
+          set -e
+          mkdir -p app/libs
+          curl -fL -o app/libs/sherpa-onnx-1.13.8.aar "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar"
+          test -s app/libs/sherpa-onnx-1.13.8.aar
+          SIZE=$(stat -c%s app/libs/sherpa-onnx-1.13.8.aar)
+          echo "sherpa-onnx AAR size: $SIZE byte"
+          if [ "$SIZE" -lt 40000000 ]; then echo "ERROR: AAR terlalu kecil, unduhan korup"; exit 1; fi
+
+      - name: Build debug APK (log ke build.log)
+        run: |
+          set -e
+          gradle assembleDebug 2>&1 | tee build.log
+          ls -lh app/build/outputs/apk/debug/
+          cp app/build/outputs/apk/debug/app-debug.apk SuaraKu-v1.0.0.apk
+          ls -lh SuaraKu-v1.0.0.apk build.log
+
+      - name: Upload build.log (SELALU, walau build gagal)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f build.log ]; then
+            gh release view build-log > /dev/null 2>&1 || gh release create build-log --title "build-log" --notes "Build logs - SuaraKu"
+            gh release upload build-log build.log --clobber
+            echo "build.log uploaded"
+          else
+            echo "build.log tidak ada (gagal sangat awal)"
+          fi
+
+      - name: Upload APK ke rolling latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          gh release view latest > /dev/null 2>&1 || gh release create latest --title "latest" --notes "Rolling latest build - SuaraKu"
+          gh release upload latest SuaraKu-v1.0.0.apk --clobber
+          echo "UPLOAD OK"
