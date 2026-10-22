@@ -30,11 +30,18 @@ jobs:
             echo "ERROR: Secret KEYSTORE_B64 belum diset - build dibatalkan supaya signature tidak acak lagi"
             exit 1
           fi
-          mkdir -p "$HOME/.android"
-          echo "$KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
-          test -s "$HOME/.android/debug.keystore"
-          echo "Keystore tetap terpasang:"
-          keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | grep -i "SHA256:" || true
+          mkdir -p signing "$HOME/.android"
+          printf '%s' "$KEYSTORE_B64" | tr -d '[:space:]' | base64 -d > signing/suaraku-tetap.keystore
+          test -s signing/suaraku-tetap.keystore
+          cp signing/suaraku-tetap.keystore "$HOME/.android/debug.keystore"
+          ls -l signing/suaraku-tetap.keystore
+          FP=$(keytool -list -v -keystore signing/suaraku-tetap.keystore -storepass android -alias androiddebugkey | grep -i "SHA256:" | head -1 | awk '{print $2}')
+          echo "Fingerprint keystore terpasang: $FP"
+          if [ "$FP" != "0A:A5:2A:F9:10:17:42:AE:5D:5A:13:80:F7:F2:E8:A4:F1:F5:88:03:80:6F:B6:09:43:72:D3:3C:78:10:30:20" ]; then
+            echo "ERROR GERBANG KEYSTORE: fingerprint tidak cocok - build dibatalkan"
+            exit 1
+          fi
+          echo "GERBANG KEYSTORE LOLOS"
 
       - name: Set up Android SDK (manual cmdline-tools, NO setup-android (broken))
         run: |
@@ -81,6 +88,18 @@ jobs:
           echo "Versi dari build.gradle: $V"
           cp app/build/outputs/apk/debug/app-debug.apk "SuaraKu-v${V}.apk"
           ls -lh "SuaraKu-v${V}.apk" build.log
+
+      - name: Gerbang sertifikat APK (wajib == kunci tetap)
+        run: |
+          set -e
+          APKSIGNER=$(ls "$HOME/android-sdk/build-tools/"*/apksigner | head -1)
+          CERT=$("$APKSIGNER" verify --print-certs SuaraKu-v*.apk | grep "SHA-256 digest" | awk '{print $NF}')
+          echo "SHA-256 sertifikat APK: $CERT"
+          if [ "$CERT" != "0aa52af9101742ae5d5a1380f7f2e8a4f1f58803806fb6094372d33c78103020" ]; then
+            echo "ERROR GERBANG SERTIFIKAT: APK tidak ditandatangani kunci tetap"
+            exit 1
+          fi
+          echo "GERBANG SERTIFIKAT LOLOS"
 
       - name: Upload build.log (SELALU, walau build gagal)
         if: always()
