@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
@@ -231,6 +232,11 @@ fun MainScreen(onOpenSettings: () -> Unit) {
                     icon = { Icon(Icons.Filled.Folder, contentDescription = null) },
                     label = { Text("Proyek") }
                 )
+                NavigationBarItem(
+                    selected = tab == 3, onClick = { tab = 3; vm.refreshStudioProjects() },
+                    icon = { Icon(Icons.Filled.RecordVoiceOver, contentDescription = null) },
+                    label = { Text("Studio") }
+                )
             }
         },
         containerColor = SkBg
@@ -242,11 +248,12 @@ fun MainScreen(onOpenSettings: () -> Unit) {
             when (tab) {
                 0 -> GeneratorTab(vm, controller, onImport = { importLauncher.launch(arrayOf("text/plain")) })
                 1 -> HistoryTab(vm, controller)
-                else -> ProjectsTab(vm)
+                2 -> ProjectsTab(vm)
+                else -> StudioTab(vm, controller)
             }
             Spacer(Modifier.height(12.dp))
             Text(
-                "SuaraKu v1.4.0 — by DAFTECH • pemakaian pribadi",
+                "SuaraKu v1.5.0 — by DAFTECH • pemakaian pribadi",
                 style = MaterialTheme.typography.bodySmall, color = SkTextDim
             )
         }
@@ -255,7 +262,7 @@ fun MainScreen(onOpenSettings: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun VoiceDropdown(label: String, voices: List<String>, selected: String, onSelect: (String) -> Unit) {
+internal fun VoiceDropdown(label: String, voices: List<String>, selected: String, onSelect: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
         OutlinedTextField(

@@ -135,10 +135,11 @@ fun SettingsScreen(onBack: () -> Unit) {
                     Text("Tentang", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "SuaraKu v1.4.0 (versionCode 5)\nby DAFTECH\n\n" +
+                        "SuaraKu v1.5.0 (versionCode 6)\nby DAFTECH\n\n" +
                             "Aplikasi text-to-voice pribadi: Gemini Ekspresif (online, key sendiri), " +
                             "Edge Gratis (tidak resmi, bisa berubah), Offline (Piper AI di HP / TTS sistem), " +
-                            "dan Supertonic (AI) — Supertonic 3 Bahasa Indonesia, 10 suara, model diunduh on-demand (OpenRAIL-M, output machine-generated).\n\n" +
+                            "dan Supertonic (AI) — Supertonic 3 Bahasa Indonesia, 10 suara, model diunduh on-demand (OpenRAIL-M, output machine-generated). " +
+                            "Tab Studio: dialog multi-suara (Supertonic) + ekspor SRT.\n\n" +
                             "Pemakaian pribadi — tidak dijual, tanpa lisensi aktivasi, tanpa iklan.",
                         style = MaterialTheme.typography.bodySmall, color = SkTextDim
                     )

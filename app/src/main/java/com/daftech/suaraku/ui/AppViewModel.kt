@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.daftech.suaraku.Prefs
 import com.daftech.suaraku.audio.AudioStore
+import com.daftech.suaraku.audio.WavUtil
 import com.daftech.suaraku.director.DirectorPass
 import com.daftech.suaraku.engine.EdgeTtsEngine
 import com.daftech.suaraku.engine.GeminiTtsEngine
@@ -18,7 +19,19 @@ import com.daftech.suaraku.engine.SupertonicDownloader
 import com.daftech.suaraku.engine.SupertonicTtsEngine
 import com.daftech.suaraku.engine.SystemTtsEngine
 import com.daftech.suaraku.project.ProjectStore
+import com.daftech.suaraku.project.StudioProject
+import com.daftech.suaraku.project.StudioProjectStore
 import com.daftech.suaraku.project.VoiceProject
+import com.daftech.suaraku.studio.DEFAULT_SIDS
+import com.daftech.suaraku.studio.MAX_SPEAKERS
+import com.daftech.suaraku.studio.SrtCue
+import com.daftech.suaraku.studio.StudioRunItem
+import com.daftech.suaraku.studio.StudioSegment
+import com.daftech.suaraku.studio.StudioSegmentStatus
+import com.daftech.suaraku.studio.buildSrt
+import com.daftech.suaraku.studio.parseStudioScript
+import com.daftech.suaraku.studio.speakersOf
+import com.daftech.suaraku.studio.validateVoiceMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -79,6 +92,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     init {
         refreshStatus()
         refreshProjects()
+        refreshStudioProjects()
     }
 
     fun refreshStatus() {
@@ -343,6 +357,279 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             info = "Tersimpan $ok dari ${files.size} file batch ke Download/SuaraKu."
         }
+    }
+
+    // ---- Studio dialog (v1.5.0, Supertonic-only) ----
+    var studioScript by mutableStateOf("")
+    var studioSegments by mutableStateOf<List<StudioSegment>>(emptyList())
+    var studioSpeakers by mutableStateOf<List<String>>(emptyList())
+    var studioVoiceMap by mutableStateOf<Map<String, Int>>(emptyMap())
+    var studioGenerating by mutableStateOf(false)
+    var studioProgressText by mutableStateOf("")
+    var studioProgressFraction by mutableStateOf(0f)
+    var studioRunItems by mutableStateOf<List<StudioRunItem>>(emptyList())
+    var studioSummary by mutableStateOf<String?>(null)
+    var lastStudioWav by mutableStateOf<File?>(null)
+    var lastStudioSrt by mutableStateOf<File?>(null)
+    var studioPreviewFile by mutableStateOf<File?>(null)
+    var studioProjects by mutableStateOf<List<StudioProject>>(emptyList())
+    var studioProjectName by mutableStateOf("")
+
+    /**
+     * Set naskah Studio + hitung ulang segmen/speaker. Pemetaan suara lama
+     * dipertahankan untuk speaker yang masih ada (cocok tanpa peduli huruf);
+     * speaker baru mendapat sid default dari urutan DEFAULT_SIDS yang
+     * belum dipakai. Parser tidak melempar untuk teks biasa.
+     */
+    fun updateStudioScript(script: String) {
+        studioScript = script
+        val segments = try {
+            parseStudioScript(script)
+        } catch (e: Exception) {
+            emptyList()
+        }
+        studioSegments = segments
+        val speakers = speakersOf(segments)
+        studioSpeakers = speakers
+        if (speakers.size > MAX_SPEAKERS) {
+            error = "Maksimal $MAX_SPEAKERS speaker dalam satu naskah studio, dapat ${speakers.size}"
+        }
+        val oldByLower = studioVoiceMap.entries.associateBy { it.key.lowercase() }
+        val fresh = mutableMapOf<String, Int>()
+        val used = mutableSetOf<Int>()
+        for (name in speakers) {
+            val kept = oldByLower[name.lowercase()]?.value
+            if (kept != null && kept in 0..9) {
+                fresh[name] = kept
+                used.add(kept)
+            }
+        }
+        for (name in speakers) {
+            if (name !in fresh) {
+                val sid = DEFAULT_SIDS.firstOrNull { it !in used }
+                if (sid != null) {
+                    fresh[name] = sid
+                    used.add(sid)
+                }
+            }
+        }
+        studioVoiceMap = fresh
+    }
+
+    /** Ubah suara satu speaker Studio (sid 0..9); nilai di luar rentang/speaker asing diabaikan. */
+    fun updateStudioVoice(speaker: String, sid: Int) {
+        if (!SupertonicTtsEngine.isValidSid(sid)) return
+        if (speaker !in studioSpeakers) return
+        studioVoiceMap = studioVoiceMap + (speaker to sid)
+    }
+
+    /**
+     * Generate Studio: tiap segmen dialog di-generate Supertonic (chunk
+     * DirectorPass per baris, sid per speaker), jeda = hening WAV 44.100 Hz,
+     * lalu semua segmen digabung jadi SATU WAV + SRT berdampingan.
+     * Segmen gagal TIDAK menghentikan antrean (dilewati — tidak ada audio
+     * dan tidak ada cue SRT untuk segmen itu); ringkasan akhir menyebut
+     * segmen yang gagal. Semua penulisan Compose state terjadi di Main
+     * thread (loop jalan di viewModelScope/Main, IO hanya di withContext).
+     */
+    fun generateStudio() {
+        if (generating || batchRunning || studioGenerating) return
+        val segments = studioSegments
+        if (segments.isEmpty()) {
+            error = "Naskah Studio masih kosong — tulis dialog dengan format \"Nama: kalimat...\"."
+            return
+        }
+        validateVoiceMap(studioSpeakers, studioVoiceMap)?.let { error = it; return }
+        if (!SupertonicTtsEngine.isReady(ctx)) {
+            error = "Model Supertonic belum diunduh. Buka tab Buat Suara, pilih Supertonic (AI), lalu unduh modelnya (sekitar 123 MB, sekali saja)."
+            return
+        }
+        studioGenerating = true
+        error = null
+        info = null
+        studioSummary = null
+        studioProgressFraction = 0f
+        studioRunItems = segments.mapIndexed { i, s -> StudioRunItem(i, s) }
+        viewModelScope.launch {
+            val segDir = File(ctx.cacheDir, "studio-segments")
+            try {
+                if (segDir.exists()) segDir.deleteRecursively()
+                segDir.mkdirs()
+                val okParts = mutableListOf<Triple<Int, File, Long>>() // (indeks segmen, file, durasi ms)
+                val failed = mutableListOf<String>()
+                for ((idx, item) in studioRunItems.withIndex()) {
+                    val seg = item.segment
+                    val label = when (seg) {
+                        is StudioSegment.Dialogue -> seg.speaker
+                        is StudioSegment.Pause -> "Jeda"
+                    }
+                    studioRunItems = studioRunItems.map {
+                        if (it.index == idx) it.copy(status = StudioSegmentStatus.RUNNING) else it
+                    }
+                    studioProgressText = "Segmen ${idx + 1} dari ${segments.size} — $label"
+                    studioProgressFraction = idx.toFloat() / segments.size
+                    try {
+                        val tmp = File(segDir, "seg_%02d.wav".format(idx))
+                        val durationMs = withContext(Dispatchers.IO) {
+                            when (seg) {
+                                is StudioSegment.Dialogue -> {
+                                    val sid = studioVoiceMap[seg.speaker]
+                                        ?: throw IllegalStateException("Speaker \"${seg.speaker}\" belum dipetakan ke suara")
+                                    val chunks = DirectorPass.chunkFor("SUPERTONIC", seg.text, directorEnabled)
+                                    if (chunks.isEmpty()) throw IllegalStateException("Baris kosong setelah dibersihkan")
+                                    SupertonicTtsEngine.synthesize(ctx, chunks, sid, speed, tmp) { _, _ -> }
+                                    val d = WavUtil.wavDurationMs(tmp)
+                                    if (d < 0) throw IllegalStateException("File audio segmen tidak terbaca")
+                                    d
+                                }
+                                is StudioSegment.Pause -> {
+                                    WavUtil.writeSilenceToWav(tmp, seg.seconds, 44100)
+                                    (seg.seconds * 1000).toLong()
+                                }
+                            }
+                        }
+                        okParts.add(Triple(idx, tmp, durationMs))
+                        studioRunItems = studioRunItems.map {
+                            if (it.index == idx) it.copy(status = StudioSegmentStatus.DONE) else it
+                        }
+                    } catch (e: Exception) {
+                        val msg = e.message ?: "Gagal tanpa pesan"
+                        failed.add("Segmen ${idx + 1} ($label)")
+                        studioRunItems = studioRunItems.map {
+                            if (it.index == idx) it.copy(status = StudioSegmentStatus.FAILED, error = msg) else it
+                        }
+                    }
+                }
+                if (okParts.isEmpty()) throw IllegalStateException("Semua segmen gagal — tidak ada audio yang bisa digabung")
+                val (outWav, outSrt) = AudioStore.newStudioFilePair(ctx, 1)
+                val cues = withContext(Dispatchers.IO) {
+                    WavUtil.concatWavsPcm16(okParts.map { it.second }, outWav, 44100)
+                    var cum = 0L
+                    val list = mutableListOf<SrtCue>()
+                    for ((idx, _, dur) in okParts) {
+                        val seg = segments[idx]
+                        if (seg is StudioSegment.Dialogue) {
+                            list.add(SrtCue(cum, cum + dur, "[${seg.speaker}] ${seg.text}"))
+                        }
+                        cum += dur
+                    }
+                    list
+                }
+                withContext(Dispatchers.IO) { outSrt.writeText(buildSrt(cues)) }
+                lastStudioWav = outWav
+                lastStudioSrt = outSrt
+                studioProgressText = "Selesai"
+                studioProgressFraction = 1f
+                val okCount = okParts.size
+                studioSummary = "$okCount berhasil, ${failed.size} gagal dari ${segments.size} segmen" +
+                    if (failed.isNotEmpty()) " — gagal: ${failed.joinToString(", ")}" else ""
+                info = "Studio selesai: ${outWav.name} (${outWav.length() / 1024} KB) + ${outSrt.name}\n" +
+                    "Suara AI (Supertonic 3, OpenRAIL-M) — output machine-generated."
+                refreshStatus()
+            } catch (e: Exception) {
+                error = e.message ?: "Studio gagal tanpa pesan"
+                studioProgressText = ""
+            } finally {
+                studioGenerating = false
+            }
+        }
+    }
+
+    /** Pratinjau satu baris dialog Studio (generate HANYA baris itu). */
+    fun previewStudioLine(index: Int) {
+        if (generating || batchRunning || studioGenerating) return
+        val seg = studioSegments.getOrNull(index) as? StudioSegment.Dialogue
+            ?: run { error = "Hanya baris dialog yang bisa dipratinjau."; return }
+        val sid = studioVoiceMap[seg.speaker]
+            ?: run { error = "Speaker \"${seg.speaker}\" belum dipetakan ke suara."; return }
+        if (!SupertonicTtsEngine.isReady(ctx)) {
+            error = "Model Supertonic belum diunduh. Buka tab Buat Suara, pilih Supertonic (AI), lalu unduh modelnya."
+            return
+        }
+        viewModelScope.launch {
+            error = null
+            studioProgressText = "Pratinjau: ${seg.speaker}..."
+            try {
+                val chunks = DirectorPass.chunkFor("SUPERTONIC", seg.text, directorEnabled)
+                if (chunks.isEmpty()) throw IllegalStateException("Baris kosong setelah dibersihkan")
+                val out = AudioStore.newStudioPreviewFile(ctx)
+                withContext(Dispatchers.IO) {
+                    SupertonicTtsEngine.synthesize(ctx, chunks, sid, speed, out) { _, _ -> }
+                }
+                studioPreviewFile = out
+                studioProgressText = "Pratinjau siap: ${seg.speaker} (${out.length() / 1024} KB)"
+                refreshStatus()
+            } catch (e: Exception) {
+                error = e.message ?: "Pratinjau gagal tanpa pesan"
+                studioProgressText = ""
+            }
+        }
+    }
+
+    /** Simpan hasil Studio (WAV + SRT) ke Download/SuaraKu. */
+    fun saveStudioToDownloads() {
+        val wav = lastStudioWav
+        val srt = lastStudioSrt
+        if (wav == null || srt == null) {
+            info = "Belum ada hasil Studio untuk disimpan."
+            return
+        }
+        viewModelScope.launch {
+            var ok = 0
+            withContext(Dispatchers.IO) {
+                if (AudioStore.saveToDownloads(ctx, wav) != null) ok++
+                if (AudioStore.saveToDownloads(ctx, srt) != null) ok++
+            }
+            info = "Tersimpan $ok dari 2 file Studio (WAV + SRT) ke Download/SuaraKu."
+        }
+    }
+
+    // ---- Proyek Studio ----
+
+    fun refreshStudioProjects() {
+        studioProjects = StudioProjectStore.loadAll(ctx)
+    }
+
+    fun saveStudioProject() {
+        val raw = studioScript.trim()
+        if (raw.isEmpty()) {
+            error = "Naskah Studio masih kosong — tidak ada yang bisa disimpan."
+            return
+        }
+        val name = studioProjectName.trim().ifEmpty { ProjectStore.defaultName(raw) }
+        StudioProjectStore.save(
+            ctx,
+            StudioProject(
+                name = name,
+                script = raw,
+                voiceMap = studioVoiceMap,
+                speed = speed,
+                savedAt = System.currentTimeMillis()
+            )
+        )
+        studioProjectName = ""
+        refreshStudioProjects()
+        info = "Proyek Studio \"$name\" tersimpan."
+    }
+
+    /** Muat proyek Studio: naskah + kecepatan + pemetaan suara tersimpan (di atas default). */
+    fun loadStudioProject(p: StudioProject) {
+        speed = p.speed
+        updateStudioScript(p.script)
+        val applied = studioVoiceMap.toMutableMap()
+        p.voiceMap.forEach { (speaker, sid) ->
+            val match = studioSpeakers.firstOrNull { it.equals(speaker, ignoreCase = true) }
+            if (match != null && sid in 0..9) applied[match] = sid
+        }
+        studioVoiceMap = applied
+        error = null
+        info = "Proyek Studio \"${p.name}\" dimuat."
+    }
+
+    fun deleteStudioProject(p: StudioProject) {
+        StudioProjectStore.delete(ctx, p.name)
+        refreshStudioProjects()
+        info = "Proyek Studio \"${p.name}\" dihapus."
     }
 
     // ---- Proyek tersimpan ----

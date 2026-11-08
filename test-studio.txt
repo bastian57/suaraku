@@ -1,0 +1,11 @@
+# Tes Studio v1.5.0 — dialog 2 tokoh + jeda
+# Cara pakai: buka tab Studio → tempel seluruh isi file ini → Generate Studio.
+# Harapan: Narator = sid 3 (default), Budi = sid 0 (default); WAV gabungan 1 file + SRT 1 file.
+# Jeda: baris kosong = 0,8 dtk; [jeda 2s] = 2 dtk.
+
+Narator: Banjir melanda tiga kecamatan sejak dini hari tadi.
+Budi: Kita berangkat jam tujuh, Pak. Perahu sudah siap di posko.
+
+[jeda 2s]
+Narator: Warga diminta tetap tenang dan mengikuti arahan petugas.
+Budi: Kalau hujan deras lagi, kita evakuasi ke balai desa.

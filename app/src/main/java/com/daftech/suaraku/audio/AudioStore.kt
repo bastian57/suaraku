@@ -58,6 +58,46 @@ object AudioStore {
         return File(outputDir(context), supertonicFileName(sid, index))
     }
 
+    /**
+     * Nama file Studio v1.5.0 (Supertonic-only, format KHUSUS):
+     * SuaraKu_YYYYMMDD_HHmm_studio_<nn>.wav — WAV gabungan dialog + jeda.
+     * File SRT memakai prefix yang sama (lihat [studioSrtFileName]).
+     * Murni, tanpa Context — dipakai unit test JVM.
+     */
+    fun studioFileName(index: Int, date: Date = Date()): String {
+        val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(date)
+        val nn = "%02d".format(index)
+        return "SuaraKu_${stamp}_studio" + "_$nn.wav"
+    }
+
+    /** Nama file SRT pendamping hasil Studio (prefix sama dengan [studioFileName]). */
+    fun studioSrtFileName(index: Int, date: Date = Date()): String {
+        val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(date)
+        val nn = "%02d".format(index)
+        return "SuaraKu_${stamp}_studio" + "_$nn.srt"
+    }
+
+    /** Nama file pratinjau satu baris Studio (bukan hasil gabungan). */
+    fun studioPreviewFileName(date: Date = Date()): String {
+        val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(date)
+        return "SuaraKu_${stamp}_studio-preview.wav"
+    }
+
+    /**
+     * Pasangan file hasil Studio (WAV + SRT) dengan stempel waktu yang SAMA.
+     * Stempel dihitung sekali supaya WAV dan SRT tidak bisa terpisah oleh
+     * pergantian menit di tengah generate.
+     */
+    fun newStudioFilePair(context: Context, index: Int): Pair<File, File> {
+        val now = Date()
+        return File(outputDir(context), studioFileName(index, now)) to
+            File(outputDir(context), studioSrtFileName(index, now))
+    }
+
+    fun newStudioPreviewFile(context: Context): File {
+        return File(outputDir(context), studioPreviewFileName())
+    }
+
     fun listHistory(context: Context): List<File> =
         outputDir(context).listFiles { f -> f.isFile && (f.extension == "wav" || f.extension == "mp3") }
             ?.sortedByDescending { it.lastModified() } ?: emptyList()
@@ -67,7 +107,12 @@ object AudioStore {
      * @return nama/path tujuan bila sukses, null bila gagal (file tetap aman di folder app).
      */
     fun saveToDownloads(context: Context, file: File): String? {
-        val mime = if (file.extension == "mp3") "audio/mpeg" else "audio/wav"
+        // v1.5.0: SRT ikut bisa disimpan (mime subtitle, bukan audio).
+        val mime = when (file.extension) {
+            "mp3" -> "audio/mpeg"
+            "srt" -> "application/x-subrip"
+            else -> "audio/wav"
+        }
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val resolver = context.contentResolver

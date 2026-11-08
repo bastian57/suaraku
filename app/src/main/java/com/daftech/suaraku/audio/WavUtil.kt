@@ -49,4 +49,57 @@ object WavUtil {
         }
         writePcm16ToWav(outFile, pcm.toByteArray(), sampleRate)
     }
+
+    /**
+     * Hening PCM16 (nol) selama [seconds] detik (v1.5.0, jeda Studio).
+     * Catatan: seluruh hening dipegang di RAM — jeda studio di-clamp maks
+     * 3 dtk, jadi puncaknya ~265 KB di 44.100 Hz, aman.
+     */
+    fun silencePcm16(seconds: Float, sampleRate: Int): ByteArray {
+        if (seconds <= 0f || sampleRate <= 0) return ByteArray(0)
+        val frames = (seconds * sampleRate).toInt().coerceAtLeast(0)
+        return ByteArray(frames * 2) // s16le mono: 2 byte per frame, semua nol
+    }
+
+    /** Tulis file WAV berisi hening selama [seconds] detik. */
+    fun writeSilenceToWav(file: File, seconds: Float, sampleRate: Int) {
+        writePcm16ToWav(file, silencePcm16(seconds, sampleRate), sampleRate)
+    }
+
+    /**
+     * Durasi file WAV (milidetik) dari header kanonik 44 byte
+     * (RIFF/WAVE + sampleRate di offset 24 + ukuran data di offset 40).
+     * File bukan WAV / header rusak / terlalu pendek -> -1.
+     * Hanya membaca header, bukan seluruh isi file.
+     */
+    fun wavDurationMs(file: File): Long {
+        return try {
+            if (!file.isFile || file.length() < 44) return -1
+            val h = ByteArray(44)
+            file.inputStream().use { it.read(h) }
+            if (h[0] != 'R'.code.toByte() || h[1] != 'I'.code.toByte() ||
+                h[2] != 'F'.code.toByte() || h[3] != 'F'.code.toByte()
+            ) return -1
+            if (h[8] != 'W'.code.toByte() || h[9] != 'A'.code.toByte() ||
+                h[10] != 'V'.code.toByte() || h[11] != 'E'.code.toByte()
+            ) return -1
+            fun le32(off: Int): Long =
+                (h[off].toLong() and 0xFF) or
+                    ((h[off + 1].toLong() and 0xFF) shl 8) or
+                    ((h[off + 2].toLong() and 0xFF) shl 16) or
+                    ((h[off + 3].toLong() and 0xFF) shl 24)
+            fun le16(off: Int): Int =
+                (h[off].toInt() and 0xFF) or ((h[off + 1].toInt() and 0xFF) shl 8)
+            val sampleRate = le32(24)
+            val channels = le16(22)
+            val bits = le16(34)
+            val dataSize = le32(40)
+            if (sampleRate <= 0 || channels <= 0 || bits <= 0) return -1
+            val bytesPerSec = sampleRate * channels * bits / 8
+            if (bytesPerSec <= 0) return -1
+            dataSize * 1000 / bytesPerSec
+        } catch (e: Exception) {
+            -1
+        }
+    }
 }
