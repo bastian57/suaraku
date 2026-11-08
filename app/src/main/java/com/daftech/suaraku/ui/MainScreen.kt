@@ -18,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
@@ -62,11 +63,16 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.daftech.suaraku.Prefs
 import com.daftech.suaraku.audio.AudioStore
+import com.daftech.suaraku.director.DirectorPass
 import com.daftech.suaraku.engine.EdgeTtsEngine
 import com.daftech.suaraku.engine.GeminiTtsEngine
 import com.daftech.suaraku.engine.Presets
+import com.daftech.suaraku.project.VoiceProject
 import kotlinx.coroutines.delay
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /* ---------------- Player bersama (1 MediaPlayer untuk semua tombol putar) ---------------- */
 
@@ -217,6 +223,11 @@ fun MainScreen(onOpenSettings: () -> Unit) {
                     icon = { Icon(Icons.Filled.InsertDriveFile, contentDescription = null) },
                     label = { Text("Riwayat") }
                 )
+                NavigationBarItem(
+                    selected = tab == 2, onClick = { tab = 2; vm.refreshProjects() },
+                    icon = { Icon(Icons.Filled.Folder, contentDescription = null) },
+                    label = { Text("Proyek") }
+                )
             }
         },
         containerColor = SkBg
@@ -225,14 +236,14 @@ fun MainScreen(onOpenSettings: () -> Unit) {
             modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-            if (tab == 0) {
-                GeneratorTab(vm, controller, onImport = { importLauncher.launch(arrayOf("text/plain")) })
-            } else {
-                HistoryTab(vm, controller)
+            when (tab) {
+                0 -> GeneratorTab(vm, controller, onImport = { importLauncher.launch(arrayOf("text/plain")) })
+                1 -> HistoryTab(vm, controller)
+                else -> ProjectsTab(vm)
             }
             Spacer(Modifier.height(12.dp))
             Text(
-                "SuaraKu v1.0.2 — by DAFTECH • pemakaian pribadi",
+                "SuaraKu v1.3.0 — by DAFTECH • pemakaian pribadi",
                 style = MaterialTheme.typography.bodySmall, color = SkTextDim
             )
         }
@@ -340,7 +351,22 @@ private fun GeneratorTab(vm: AppViewModel, controller: PlayerController, onImpor
     }
 
     Spacer(Modifier.height(14.dp))
-    Text("Preset Ekspresi", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    Text("Preset Voice-Over (gaya dasar)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    Spacer(Modifier.height(8.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Presets.VO_PRESETS.take(3).forEach { p ->
+            FilterChip(selected = vm.voPresetId == p.id, onClick = { vm.voPresetId = p.id }, label = { Text(p.label) })
+        }
+    }
+    Spacer(Modifier.height(6.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Presets.VO_PRESETS.drop(3).forEach { p ->
+            FilterChip(selected = vm.voPresetId == p.id, onClick = { vm.voPresetId = p.id }, label = { Text(p.label) })
+        }
+    }
+
+    Spacer(Modifier.height(14.dp))
+    Text("Preset Ekspresi (pewarna)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
     Spacer(Modifier.height(8.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Presets.ALL.take(3).forEach { p ->
@@ -390,6 +416,23 @@ private fun GeneratorTab(vm: AppViewModel, controller: PlayerController, onImpor
         "${vm.text.length} karakter",
         style = MaterialTheme.typography.bodySmall, color = SkTextDim
     )
+    // Preview chunk + estimasi request SEBELUM generate (transparansi kuota).
+    val preview = remember(vm.text, vm.directorEnabled, vm.engine) {
+        if (vm.text.isBlank()) null else DirectorPass.preview(vm.text, vm.directorEnabled, vm.engine)
+    }
+    preview?.let { p ->
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Preview: ${p.chunkCount} potongan • Gemini ${p.geminiRequests} request • Edge ${p.edgeRequests} sesi • Offline 0 request",
+            style = MaterialTheme.typography.bodySmall, color = SkTextDim
+        )
+        if (vm.engine == Prefs.ENGINE_GEMINI) {
+            Text(
+                "Kuota free Gemini ±15 request/hari — teks panjang = banyak request.",
+                style = MaterialTheme.typography.bodySmall, color = SkTextDim
+            )
+        }
+    }
 
     Spacer(Modifier.height(10.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -423,7 +466,7 @@ private fun GeneratorTab(vm: AppViewModel, controller: PlayerController, onImpor
     Spacer(Modifier.height(14.dp))
     Button(
         onClick = { vm.generate() },
-        enabled = !vm.generating,
+        enabled = !vm.generating && !vm.batchRunning,
         modifier = Modifier.fillMaxWidth().height(52.dp)
     ) {
         Icon(if (vm.generating) Icons.Filled.Refresh else Icons.Filled.Mic, contentDescription = null)
@@ -470,6 +513,91 @@ private fun GeneratorTab(vm: AppViewModel, controller: PlayerController, onImpor
             }
         }
     }
+
+    BatchSection(vm, controller)
+}
+
+private fun batchStatusLabel(status: BatchStatus): String = when (status) {
+    BatchStatus.QUEUED -> "Antre"
+    BatchStatus.RUNNING -> "Berjalan…"
+    BatchStatus.DONE -> "Selesai"
+    BatchStatus.FAILED -> "Gagal"
+}
+
+@Composable
+private fun BatchSection(vm: AppViewModel, controller: PlayerController) {
+    Spacer(Modifier.height(20.dp))
+    Text("Batch Generate", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    Spacer(Modifier.height(6.dp))
+    Text(
+        "Pisahkan tiap bagian dengan BARIS KOSONG (atau garis ---). Tiap bagian jadi 1 file; bagian yang gagal tidak menghentikan antrean.",
+        style = MaterialTheme.typography.bodySmall, color = SkTextDim
+    )
+    Spacer(Modifier.height(8.dp))
+    OutlinedButton(
+        onClick = { vm.generateBatch() },
+        enabled = !vm.generating && !vm.batchRunning,
+        modifier = Modifier.fillMaxWidth().height(48.dp)
+    ) {
+        Icon(if (vm.batchRunning) Icons.Filled.Refresh else Icons.Filled.Mic, contentDescription = null)
+        Spacer(Modifier.width(8.dp))
+        Text(if (vm.batchRunning) "Batch Berjalan..." else "GENERATE BATCH")
+    }
+
+    if (vm.batchRunning) {
+        Spacer(Modifier.height(10.dp))
+        LinearProgressIndicator(progress = { vm.progressFraction.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+        Text(vm.progressText, style = MaterialTheme.typography.bodySmall, color = SkTextDim)
+    }
+
+    vm.batchSummary?.let { summary ->
+        Spacer(Modifier.height(8.dp))
+        Text("Ringkasan batch: $summary", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+        if (vm.batchItems.any { it.status == BatchStatus.DONE }) {
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = { vm.saveAllBatchToDownloads() }, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Filled.Download, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("Simpan Semua ke Download")
+            }
+        }
+    }
+
+    if (vm.batchItems.isNotEmpty()) {
+        Spacer(Modifier.height(10.dp))
+        vm.batchItems.forEach { item ->
+            Card(colors = CardDefaults.cardColors(containerColor = SkSurface), modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "Bagian ${item.id}",
+                            style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            batchStatusLabel(item.status),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (item.status == BatchStatus.FAILED) MaterialTheme.colorScheme.error else SkGold
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        item.text.take(80) + if (item.text.length > 80) "…" else "",
+                        style = MaterialTheme.typography.bodySmall, color = SkTextDim
+                    )
+                    item.error?.let { err ->
+                        Spacer(Modifier.height(4.dp))
+                        Text(err, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
+                    item.outputFile?.let { file ->
+                        Spacer(Modifier.height(8.dp))
+                        AudioPlayerBar(controller, file)
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+    }
 }
 
 private val ColorErrorContainer = androidx.compose.ui.graphics.Color(0xFF3A1D1D)
@@ -506,4 +634,78 @@ private fun HistoryTab(vm: AppViewModel, controller: PlayerController) {
         }
         Spacer(Modifier.height(12.dp))
     }
+}
+
+private fun fmtProjectDate(ms: Long): String =
+    SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.US).format(Date(ms))
+
+@Composable
+private fun ProjectsTab(vm: AppViewModel) {
+    Text("Proyek Tersimpan", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    Spacer(Modifier.height(8.dp))
+    Text(
+        "Simpan setup saat ini (teks + mesin + suara + preset) sebagai proyek, lalu muat lagi kapan pun.",
+        style = MaterialTheme.typography.bodySmall, color = SkTextDim
+    )
+    Spacer(Modifier.height(10.dp))
+    OutlinedTextField(
+        value = vm.projectName,
+        onValueChange = { vm.projectName = it },
+        label = { Text("Nama proyek (opsional)") },
+        placeholder = { Text("Kosong = 6 kata pertama teks") },
+        colors = skFieldColors(),
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true
+    )
+    Spacer(Modifier.height(8.dp))
+    Button(onClick = { vm.saveCurrentProject() }, modifier = Modifier.fillMaxWidth()) {
+        Icon(Icons.Filled.Folder, contentDescription = null)
+        Spacer(Modifier.width(6.dp))
+        Text("SIMPAN PROYEK INI")
+    }
+
+    Spacer(Modifier.height(16.dp))
+    if (vm.projects.isEmpty()) {
+        Text("Belum ada proyek tersimpan.", color = SkTextDim)
+        return
+    }
+    vm.projects.forEach { project ->
+        ProjectCard(vm, project)
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun ProjectCard(vm: AppViewModel, project: VoiceProject) {
+    Card(colors = CardDefaults.cardColors(containerColor = SkSurface), modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(project.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "${engineLabel(project.engine)} • ${Presets.voById(project.voPresetId).label} • ${Presets.byId(project.presetId).label} • ${fmtProjectDate(project.savedAt)}",
+                style = MaterialTheme.typography.bodySmall, color = SkTextDim
+            )
+            Text(
+                project.text.take(100) + if (project.text.length > 100) "…" else "",
+                style = MaterialTheme.typography.bodySmall, color = SkTextDim
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { vm.loadProject(project) }) {
+                    Text("Muat")
+                }
+                OutlinedButton(onClick = { vm.deleteProject(project) }) {
+                    Icon(Icons.Filled.Delete, contentDescription = null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Hapus")
+                }
+            }
+        }
+    }
+}
+
+private fun engineLabel(engine: String): String = when (engine) {
+    Prefs.ENGINE_GEMINI -> "Gemini"
+    Prefs.ENGINE_EDGE -> "Edge"
+    else -> "Offline"
 }

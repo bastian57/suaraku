@@ -24,9 +24,22 @@ object AudioStore {
         return dir
     }
 
-    fun newOutputFile(context: Context, engineTag: String, ext: String): File {
-        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        return File(outputDir(context), "suaraku_${engineTag}_$stamp.$ext")
+    /**
+     * Nama file output konsisten v1.3.0:
+     * SuaraKu_YYYYMMDD_HHmm_<engine>-<voPreset>_<nn>.<ext>
+     * (nn = nomor urut 2 digit, 01 untuk generate biasa, 01..N untuk batch).
+     * Menit (bukan detik) + nomor urut membuat nama tetap unik dalam satu
+     * menit yang sama tanpa terlihat seperti nama sementara.
+     */
+    /** Nama file saja (murni, tanpa Context) — dipakai unit test JVM. */
+    fun outputFileName(engineTag: String, voPresetId: String, index: Int, ext: String, date: Date = Date()): String {
+        val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(date)
+        val nn = "%02d".format(index)
+        return "SuaraKu_${stamp}_${engineTag}-${voPresetId}_$nn.$ext"
+    }
+
+    fun newNamedOutputFile(context: Context, engineTag: String, voPresetId: String, index: Int, ext: String): File {
+        return File(outputDir(context), outputFileName(engineTag, voPresetId, index, ext))
     }
 
     fun listHistory(context: Context): List<File> =
