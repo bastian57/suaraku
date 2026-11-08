@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -67,6 +68,8 @@ import com.daftech.suaraku.director.DirectorPass
 import com.daftech.suaraku.engine.EdgeTtsEngine
 import com.daftech.suaraku.engine.GeminiTtsEngine
 import com.daftech.suaraku.engine.Presets
+import com.daftech.suaraku.engine.SupertonicDownloader
+import com.daftech.suaraku.engine.SupertonicTtsEngine
 import com.daftech.suaraku.project.VoiceProject
 import kotlinx.coroutines.delay
 import java.io.File
@@ -243,7 +246,7 @@ fun MainScreen(onOpenSettings: () -> Unit) {
             }
             Spacer(Modifier.height(12.dp))
             Text(
-                "SuaraKu v1.3.0 — by DAFTECH • pemakaian pribadi",
+                "SuaraKu v1.4.0 — by DAFTECH • pemakaian pribadi",
                 style = MaterialTheme.typography.bodySmall, color = SkTextDim
             )
         }
@@ -297,8 +300,33 @@ private fun GeneratorTab(vm: AppViewModel, controller: PlayerController, onImpor
             onClick = { vm.selectEngine(Prefs.ENGINE_OFFLINE) },
             label = { Text("Offline") }
         )
+        FilterChip(
+            selected = vm.engine == Prefs.ENGINE_SUPERTONIC,
+            onClick = { vm.selectEngine(Prefs.ENGINE_SUPERTONIC) },
+            label = { Text("Supertonic (AI)") }
+        )
     }
     Spacer(Modifier.height(10.dp))
+
+    // Dialog lisensi OpenRAIL-M — ditampilkan SEBELUM unduh model Supertonic.
+    var showSupertonicLicense by remember { mutableStateOf(false) }
+    if (showSupertonicLicense) {
+        AlertDialog(
+            onDismissRequest = { showSupertonicLicense = false },
+            title = { Text("Lisensi Model Supertonic 3") },
+            text = { Text(SupertonicDownloader.LICENSE_SUMMARY) },
+            confirmButton = {
+                Button(onClick = { showSupertonicLicense = false; vm.downloadSupertonicModel() }) {
+                    Text("Saya mengerti, unduh")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showSupertonicLicense = false }) {
+                    Text("Batal")
+                }
+            }
+        )
+    }
 
     when (vm.engine) {
         Prefs.ENGINE_GEMINI -> {
@@ -318,6 +346,44 @@ private fun GeneratorTab(vm: AppViewModel, controller: PlayerController, onImpor
                 "Engine gratis tidak resmi dari Microsoft — bisa berubah/berhenti sewaktu-waktu.",
                 color = SkTextDim, style = MaterialTheme.typography.bodySmall
             )
+        }
+        Prefs.ENGINE_SUPERTONIC -> {
+            VoiceDropdown(
+                "Suara Supertonic",
+                SupertonicTtsEngine.VOICES,
+                SupertonicTtsEngine.voiceLabel(vm.supertonicSid)
+            ) { label ->
+                val sid = SupertonicTtsEngine.VOICES.indexOf(label)
+                if (sid >= 0) vm.selectSupertonicSid(sid)
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Supertonic tidak punya pengaturan nada/prosody per-engine: gaya suara diatur lewat pilihan Suara 1–10 di atas. Preset voice-over & emosi di bawah hanya memengaruhi teks (Director Pass), bukan suara.",
+                color = SkTextDim, style = MaterialTheme.typography.bodySmall
+            )
+            Spacer(Modifier.height(8.dp))
+            Card(colors = CardDefaults.cardColors(containerColor = SkSurface), modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        if (vm.supertonicReady) "Model Supertonic 3: TERPASANG (AI offline di HP, 10 suara)"
+                        else "Model Supertonic 3 belum diunduh (sekitar 123 MB, sekali saja). Lisensi OpenRAIL-M — baca ringkasannya dulu sebelum mengunduh.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    if (!vm.supertonicReady) {
+                        Spacer(Modifier.height(8.dp))
+                        if (vm.supertonicDownloading) {
+                            LinearProgressIndicator(progress = vm.supertonicProgress / 100f, modifier = Modifier.fillMaxWidth())
+                            Text("Mengunduh model... ${vm.supertonicProgress}%", style = MaterialTheme.typography.bodySmall, color = SkTextDim)
+                        } else {
+                            OutlinedButton(onClick = { showSupertonicLicense = true }) {
+                                Icon(Icons.Filled.Download, contentDescription = null)
+                                Spacer(Modifier.width(6.dp))
+                                Text("Unduh Model Supertonic")
+                            }
+                        }
+                    }
+                }
+            }
         }
         else -> {
             Text(
@@ -454,7 +520,9 @@ private fun GeneratorTab(vm: AppViewModel, controller: PlayerController, onImpor
     Text("Kecepatan: ${"%.1f".format(vm.speed)}x", style = MaterialTheme.typography.bodyMedium)
     Slider(value = vm.speed, onValueChange = { vm.speed = it }, valueRange = 0.5f..2.0f)
 
-    if (vm.engine != Prefs.ENGINE_GEMINI) {
+    // Nada (pitch) hanya berlaku untuk Edge & TTS sistem. Gemini memakai
+    // arahan gaya; Supertonic tidak punya parameter pitch sama sekali.
+    if (vm.engine == Prefs.ENGINE_EDGE || vm.engine == Prefs.ENGINE_OFFLINE) {
         Text("Nada (pitch): ${vm.pitchPercent}%", style = MaterialTheme.typography.bodyMedium)
         Slider(
             value = vm.pitchPercent.toFloat(),
@@ -707,5 +775,6 @@ private fun ProjectCard(vm: AppViewModel, project: VoiceProject) {
 private fun engineLabel(engine: String): String = when (engine) {
     Prefs.ENGINE_GEMINI -> "Gemini"
     Prefs.ENGINE_EDGE -> "Edge"
+    Prefs.ENGINE_SUPERTONIC -> "Supertonic"
     else -> "Offline"
 }

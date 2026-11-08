@@ -42,6 +42,22 @@ object AudioStore {
         return File(outputDir(context), outputFileName(engineTag, voPresetId, index, ext))
     }
 
+    /**
+     * Nama file Supertonic (v1.4.0, format KHUSUS — tanpa preset voice-over,
+     * karena Supertonic tidak punya parameter prosody per-engine):
+     * SuaraKu_YYYYMMDD_HHmm_supertonic-sidN_<nn>.wav
+     * (sidN = sid 0..9 yang dipakai). Murni, tanpa Context — dipakai unit test JVM.
+     */
+    fun supertonicFileName(sid: Int, index: Int, date: Date = Date()): String {
+        val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(date)
+        val nn = "%02d".format(index)
+        return "SuaraKu_${stamp}_supertonic-sid$sid" + "_$nn.wav"
+    }
+
+    fun newSupertonicOutputFile(context: Context, sid: Int, index: Int): File {
+        return File(outputDir(context), supertonicFileName(sid, index))
+    }
+
     fun listHistory(context: Context): List<File> =
         outputDir(context).listFiles { f -> f.isFile && (f.extension == "wav" || f.extension == "mp3") }
             ?.sortedByDescending { it.lastModified() } ?: emptyList()

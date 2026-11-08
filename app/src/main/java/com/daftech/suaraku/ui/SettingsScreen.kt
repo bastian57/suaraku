@@ -52,7 +52,8 @@ fun SettingsScreen(onBack: () -> Unit) {
     val engines = listOf(
         Prefs.ENGINE_GEMINI to "Gemini Ekspresif",
         Prefs.ENGINE_EDGE to "Edge Gratis",
-        Prefs.ENGINE_OFFLINE to "Offline"
+        Prefs.ENGINE_OFFLINE to "Offline",
+        Prefs.ENGINE_SUPERTONIC to "Supertonic (AI)"
     )
 
     Scaffold(
@@ -134,9 +135,10 @@ fun SettingsScreen(onBack: () -> Unit) {
                     Text("Tentang", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "SuaraKu v1.3.0 (versionCode 4)\nby DAFTECH\n\n" +
+                        "SuaraKu v1.4.0 (versionCode 5)\nby DAFTECH\n\n" +
                             "Aplikasi text-to-voice pribadi: Gemini Ekspresif (online, key sendiri), " +
-                            "Edge Gratis (tidak resmi, bisa berubah), dan Offline (Piper AI di HP / TTS sistem).\n\n" +
+                            "Edge Gratis (tidak resmi, bisa berubah), Offline (Piper AI di HP / TTS sistem), " +
+                            "dan Supertonic (AI) — Supertonic 3 Bahasa Indonesia, 10 suara, model diunduh on-demand (OpenRAIL-M, output machine-generated).\n\n" +
                             "Pemakaian pribadi — tidak dijual, tanpa lisensi aktivasi, tanpa iklan.",
                         style = MaterialTheme.typography.bodySmall, color = SkTextDim
                     )

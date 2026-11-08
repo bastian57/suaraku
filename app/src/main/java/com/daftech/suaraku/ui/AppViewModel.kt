@@ -14,6 +14,8 @@ import com.daftech.suaraku.engine.GeminiTtsEngine
 import com.daftech.suaraku.engine.ModelDownloader
 import com.daftech.suaraku.engine.Presets
 import com.daftech.suaraku.engine.SherpaTtsEngine
+import com.daftech.suaraku.engine.SupertonicDownloader
+import com.daftech.suaraku.engine.SupertonicTtsEngine
 import com.daftech.suaraku.engine.SystemTtsEngine
 import com.daftech.suaraku.project.ProjectStore
 import com.daftech.suaraku.project.VoiceProject
@@ -32,6 +34,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     var engine by mutableStateOf(prefs.defaultEngine)
     var voiceGemini by mutableStateOf("Kore")
     var voiceEdge by mutableStateOf("id-ID-ArdiNeural")
+    var supertonicSid by mutableStateOf(prefs.supertonicSid)
     var presetId by mutableStateOf("netral")
     var voPresetId by mutableStateOf("umum")
     var customStyle by mutableStateOf("")
@@ -68,6 +71,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     var modelDownloading by mutableStateOf(false)
     var modelProgress by mutableStateOf(0)
 
+    // ---- Model Supertonic (v1.4.0, terpisah dari Piper) ----
+    var supertonicReady by mutableStateOf(false)
+    var supertonicDownloading by mutableStateOf(false)
+    var supertonicProgress by mutableStateOf(0)
+
     init {
         refreshStatus()
         refreshProjects()
@@ -76,6 +84,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshStatus() {
         history = AudioStore.listHistory(ctx)
         modelReady = SherpaTtsEngine.isReady(ctx)
+        supertonicReady = SupertonicTtsEngine.isReady(ctx)
     }
 
     fun refreshProjects() {
@@ -85,6 +94,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun selectEngine(e: String) {
         engine = e
         prefs.defaultEngine = e
+    }
+
+    /** Pilih suara Supertonic (sid 0..9); di luar rentang ditolak diam-diam (state tidak berubah). */
+    fun selectSupertonicSid(sid: Int) {
+        if (!SupertonicTtsEngine.isValidSid(sid)) return
+        supertonicSid = sid
+        prefs.supertonicSid = sid
     }
 
     fun downloadModel() {
@@ -106,6 +122,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Unduh model Supertonic (dipanggil SETELAH user menyetujui ringkasan lisensi di dialog). */
+    fun downloadSupertonicModel() {
+        if (supertonicDownloading) return
+        viewModelScope.launch {
+            supertonicDownloading = true
+            error = null
+            try {
+                withContext(Dispatchers.IO) {
+                    SupertonicDownloader.downloadAndExtract(ctx) { pct -> supertonicProgress = pct }
+                }
+                supertonicReady = true
+                info = "Model Supertonic 3 berhasil diunduh (SHA-256 cocok). Engine Supertonic (AI) sekarang bisa dipakai."
+            } catch (e: Exception) {
+                error = "Gagal unduh model Supertonic: ${e.message}"
+            } finally {
+                supertonicDownloading = false
+            }
+        }
+    }
+
     /**
      * Tulis progres ke Compose state — SELALU lewat Main thread.
      * Dipanggil dari callback engine yang berjalan di thread IO, jadi
@@ -123,10 +159,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun engineTag(): String = when (engine) {
         Prefs.ENGINE_GEMINI -> "gemini"
         Prefs.ENGINE_EDGE -> "edge"
+        Prefs.ENGINE_SUPERTONIC -> "supertonic-sid$supertonicSid"
         else -> "offline"
     }
 
     private fun outputExt(): String = if (engine == Prefs.ENGINE_EDGE) "mp3" else "wav"
+
+    /**
+     * File output untuk engine saat ini. Supertonic memakai format nama
+     * KHUSUS (tanpa preset voice-over): SuaraKu_YYYYMMDD_HHmm_supertonic-sidN_<nn>.wav;
+     * engine lain memakai format v1.3.0 (engine-voPreset).
+     */
+    private fun newOutputFile(index: Int): File =
+        if (engine == Prefs.ENGINE_SUPERTONIC) AudioStore.newSupertonicOutputFile(ctx, supertonicSid, index)
+        else AudioStore.newNamedOutputFile(ctx, engineTag(), voPresetId, index, outputExt())
 
     /**
      * Inti generate: chunking per-engine + layering preset VO & emosi,
@@ -160,6 +206,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     EdgeTtsEngine.synthesize(chunks, voiceEdge, rate, pitch, volume, out) { d, t ->
                         reportProgress(progressLabel, d, t)
                     }
+                }
+            }
+            Prefs.ENGINE_SUPERTONIC -> {
+                // Supertonic TIDAK punya parameter prosody per-engine: preset
+                // VO/emosi dan pitch TIDAK dipetakan ke apa pun (didokumentasikan
+                // di SupertonicTtsEngine). Yang dipakai: chunk (DirectorPass),
+                // sid, dan speed slider. Model belum siap = error jelas, bukan crash.
+                if (!SupertonicTtsEngine.isReady(ctx)) throw IllegalStateException(
+                    "Model Supertonic belum diunduh. Buka bagian Supertonic (AI) di atas lalu unduh modelnya (sekitar 123 MB, sekali saja)."
+                )
+                withContext(Dispatchers.IO) {
+                    SupertonicTtsEngine.synthesize(ctx, chunks, supertonicSid, speed, out) { d, t ->
+                        reportProgress("$progressLabel (Supertonic AI)", d, t)
+                    }
+                }
+                withContext(Dispatchers.Main) {
+                    info = "Suara AI (Supertonic 3, OpenRAIL-M) — output machine-generated."
                 }
             }
             else -> { // OFFLINE
@@ -205,7 +268,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             progressFraction = 0f
             progressText = "Menyiapkan teks (director pass)..."
             try {
-                val out = AudioStore.newNamedOutputFile(ctx, engineTag(), voPresetId, 1, outputExt())
+                val out = newOutputFile(1)
                 synthesizeText(raw, out, "Membuat suara")
                 lastFile = out
                 progressText = "Selesai"
@@ -236,12 +299,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         progressText = "Batch: menyiapkan ${parts.size} bagian..."
         viewModelScope.launch {
             try {
-                val tag = engineTag()
-                val ext = outputExt()
                 val finalItems = executeBatch(
                     items = batchItems,
                     process = { item ->
-                        val out = AudioStore.newNamedOutputFile(ctx, tag, voPresetId, item.id, ext)
+                        val out = newOutputFile(item.id)
                         synthesizeText(item.text, out, "Bagian ${item.id}")
                         out
                     },
@@ -303,7 +364,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 speed = speed,
                 pitchPercent = pitchPercent,
                 customStyle = customStyle,
-                savedAt = System.currentTimeMillis()
+                savedAt = System.currentTimeMillis(),
+                supertonicSid = supertonicSid
             )
         )
         projectName = ""
@@ -316,6 +378,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         selectEngine(p.engine)
         voiceGemini = p.voiceGemini
         voiceEdge = p.voiceEdge
+        selectSupertonicSid(p.supertonicSid)
         presetId = p.presetId
         voPresetId = p.voPresetId
         speed = p.speed

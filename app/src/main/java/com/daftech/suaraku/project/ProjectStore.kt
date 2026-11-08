@@ -22,7 +22,9 @@ data class VoiceProject(
     val speed: Float,
     val pitchPercent: Int,
     val customStyle: String,
-    val savedAt: Long
+    val savedAt: Long,
+    /** Suara Supertonic yang dipilih (sid 0..9, default 3). Proyek lama (v1.3.0) tidak punya field ini -> default 3 saat dimuat. */
+    val supertonicSid: Int = 3
 )
 
 object ProjectStore {
@@ -49,6 +51,7 @@ object ProjectStore {
         put("pitchPercent", p.pitchPercent)
         put("customStyle", p.customStyle)
         put("savedAt", p.savedAt)
+        put("supertonicSid", p.supertonicSid)
     }
 
     fun fromJson(o: JSONObject): VoiceProject = VoiceProject(
@@ -62,7 +65,8 @@ object ProjectStore {
         speed = o.optDouble("speed", 1.0).toFloat(),
         pitchPercent = o.optInt("pitchPercent", 0),
         customStyle = o.optString("customStyle", ""),
-        savedAt = o.optLong("savedAt", 0L)
+        savedAt = o.optLong("savedAt", 0L),
+        supertonicSid = o.optInt("supertonicSid", 3).coerceIn(0, 9)
     )
 
     private fun file(context: Context): File = File(context.filesDir, FILE_NAME)

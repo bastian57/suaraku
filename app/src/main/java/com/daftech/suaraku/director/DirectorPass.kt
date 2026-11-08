@@ -38,14 +38,17 @@ object DirectorPass {
     const val GEMINI_CHUNK_CHARS = 350
     const val EDGE_CHUNK_CHARS = 600
     const val OFFLINE_CHUNK_CHARS = 800
+    /** Supertonic 3: sama seperti Offline (800) — model on-device tanpa batas API cloud; chunk besar = lebih sedikit jeda antar potongan. */
+    const val SUPERTONIC_CHUNK_CHARS = 800
 
     /** Ekor di bawah panjang ini digabung ke chunk sebelumnya bila muat. */
     const val SMALL_TAIL_CHARS = 60
 
-    /** Batas chunk untuk engine tertentu ("GEMINI"/"EDGE"/"OFFLINE", default 350). */
+    /** Batas chunk untuk engine tertentu ("GEMINI"/"EDGE"/"OFFLINE"/"SUPERTONIC", default 350). */
     fun chunkLimitFor(engine: String): Int = when (engine) {
         "EDGE" -> EDGE_CHUNK_CHARS
         "OFFLINE" -> OFFLINE_CHUNK_CHARS
+        "SUPERTONIC" -> SUPERTONIC_CHUNK_CHARS
         else -> GEMINI_CHUNK_CHARS
     }
 
