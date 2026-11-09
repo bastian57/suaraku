@@ -333,27 +333,40 @@ private fun GeneratorTab(vm: AppViewModel, controller: PlayerController, onImpor
     val context = LocalContext.current
 
     SectionTitle("Mesin Suara")
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        FilterChip(
-            selected = vm.engine == Prefs.ENGINE_GEMINI,
-            onClick = { vm.selectEngine(Prefs.ENGINE_GEMINI) },
-            label = { Text("Gemini Ekspresif") }
-        )
-        FilterChip(
-            selected = vm.engine == Prefs.ENGINE_EDGE,
-            onClick = { vm.selectEngine(Prefs.ENGINE_EDGE) },
-            label = { Text("Edge Gratis") }
-        )
-        FilterChip(
-            selected = vm.engine == Prefs.ENGINE_OFFLINE,
-            onClick = { vm.selectEngine(Prefs.ENGINE_OFFLINE) },
-            label = { Text("Offline") }
-        )
-        FilterChip(
-            selected = vm.engine == Prefs.ENGINE_SUPERTONIC,
-            onClick = { vm.selectEngine(Prefs.ENGINE_SUPERTONIC) },
-            label = { Text("Supertonic (AI)") }
-        )
+    // Grid 2x2 (fix v1.6.1): 4 chip dalam 1 Row terpotong di layar 360dp
+    // (chip ke-4 'Supertonic (AI)' tidak terlihat padahal itu engine yang
+    // sedang aktif — Row biasa tanpa scroll/wrap memotong overflow begitu
+    // saja). Dua baris x 2 chip, tiap chip weight(1f) supaya keempatnya
+    // selalu muat penuh tanpa terpotong di layar kecil.
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = vm.engine == Prefs.ENGINE_GEMINI,
+                onClick = { vm.selectEngine(Prefs.ENGINE_GEMINI) },
+                label = { Text("Gemini Ekspresif") },
+                modifier = Modifier.weight(1f)
+            )
+            FilterChip(
+                selected = vm.engine == Prefs.ENGINE_EDGE,
+                onClick = { vm.selectEngine(Prefs.ENGINE_EDGE) },
+                label = { Text("Edge Gratis") },
+                modifier = Modifier.weight(1f)
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = vm.engine == Prefs.ENGINE_OFFLINE,
+                onClick = { vm.selectEngine(Prefs.ENGINE_OFFLINE) },
+                label = { Text("Offline") },
+                modifier = Modifier.weight(1f)
+            )
+            FilterChip(
+                selected = vm.engine == Prefs.ENGINE_SUPERTONIC,
+                onClick = { vm.selectEngine(Prefs.ENGINE_SUPERTONIC) },
+                label = { Text("Supertonic (AI)") },
+                modifier = Modifier.weight(1f)
+            )
+        }
     }
     Spacer(Modifier.height(10.dp))
 

@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -120,6 +121,16 @@ fun StudioTab(vm: AppViewModel, controller: PlayerController) {
             StudioSpeakerCard(vm, speaker)
             Spacer(Modifier.height(8.dp))
         }
+    } else {
+        // Hint empty-state (fix v1.6.1): kartu speaker hanya muncul
+        // setelah naskah ditempel — tanpa petunjuk ini pengguna tidak
+        // tahu kartu itu akan muncul dan mengira fitur multi-engine
+        // tidak ada. Kartu ini diganti kartu speaker begitu ada speaker.
+        Spacer(Modifier.height(SectionGap))
+        EmptyStateCard(
+            Icons.Filled.RecordVoiceOver,
+            "Tempel naskah dialog dulu — kartu Mesin + Suara per tokoh muncul di sini."
+        )
     }
 
     Spacer(Modifier.height(10.dp))
