@@ -89,12 +89,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     var supertonicDownloading by mutableStateOf(false)
     var supertonicProgress by mutableStateOf(0)
 
-    init {
-        refreshStatus()
-        refreshProjects()
-        refreshStudioProjects()
-    }
-
     fun refreshStatus() {
         history = AudioStore.listHistory(ctx)
         modelReady = SherpaTtsEngine.isReady(ctx)
@@ -374,6 +368,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     var studioPreviewFile by mutableStateOf<File?>(null)
     var studioProjects by mutableStateOf<List<StudioProject>>(emptyList())
     var studioProjectName by mutableStateOf("")
+
+    // Blok init HARUS di sini — setelah SEMUA deklarasi state (v1.5.0 fix1).
+    // Dulu init ada di atas (baris ~92) dan memanggil refreshStudioProjects(),
+    // yang menulis `studioProjects` — padahal field delegate-nya baru
+    // dideklarasikan di bawah init → NPE di setter sintetis saat konstruksi
+    // (crash startup v1.5.0, logcat 9 Nov 2026). refreshStudioProjects()
+    // sengaja TIDAK dipanggil di init: tab Studio me-refresh saat diklik.
+    init {
+        refreshStatus()
+        refreshProjects()
+    }
 
     /**
      * Set naskah Studio + hitung ulang segmen/speaker. Pemetaan suara lama
