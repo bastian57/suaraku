@@ -13,6 +13,8 @@ val SkSurface = Color(0xFF131C2E)
 val SkText = Color(0xFFF2F6FC)
 val SkTextDim = Color(0xFF9DB0CC)
 val SkFieldBg = Color(0xFF0F1930)
+/** Latar kartu error (v1.6.0): satu sumber — dulu ada dua salinan lokal (MainScreen + StudioTab). */
+val SkErrorContainer = Color(0xFF3A1D1D)
 
 private val SkDarkColors = darkColorScheme(
     primary = SkGold,

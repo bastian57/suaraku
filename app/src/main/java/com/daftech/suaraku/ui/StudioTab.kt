@@ -27,41 +27,68 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.daftech.suaraku.audio.AudioStore
+import com.daftech.suaraku.engine.EdgeTtsEngine
+import com.daftech.suaraku.engine.GeminiTtsEngine
 import com.daftech.suaraku.engine.SupertonicTtsEngine
 import com.daftech.suaraku.project.StudioProject
 import com.daftech.suaraku.studio.StudioRunItem
 import com.daftech.suaraku.studio.StudioSegment
 import com.daftech.suaraku.studio.StudioSegmentStatus
-
-private val StudioErrorContainer = Color(0xFF3A1D1D)
+import com.daftech.suaraku.studio.StudioVoice
+import com.daftech.suaraku.studio.StudioVoices
 
 /**
- * Tab Studio v1.5.0 — dialog multi-suara (Supertonic-only).
+ * Tab Studio v1.6.0 — dialog multi-suara MULTI-ENGINE.
  *
- * Keputusan UI (didokumentasikan di laporan): Studio jadi TAB KE-4 di
- * NavigationBar, bukan seksi di dalam tab Buat Suara — Studio punya
- * alur sendiri (editor naskah + pemetaan suara + generate + pratinjau +
- * proyek) yang akan membuat GeneratorTab yang sudah 300+ baris makin
- * sulit dibaca bila dicampur. Tab baru hanya menambah 1 NavigationBarItem
- * + 1 cabang when di MainScreen; selebihnya file ini berdiri sendiri.
+ * v1.5.0: Supertonic-only. v1.6.0: tiap speaker bisa pakai engine sendiri
+ * (Supertonic / Gemini / Edge / Offline) + suara engine itu. Semua segmen
+ * diseragamkan ke WAV PCM16 mono 44,1 kHz sebelum digabung (lihat
+ * WavUtil.convertToWav44100).
+ *
+ * Pratinjau (v1.6.0): setelah tap ▶ di baris dan file pratinjau jadi,
+ * pratinjau LANGSUNG BUNYI (auto-play via LaunchedEffect ber-key path
+ * file) — tidak perlu scroll + tap kedua seperti v1.5.0.
+ *
+ * Keputusan UI (dari v1.5.0): Studio jadi TAB KE-4 di NavigationBar,
+ * bukan seksi di dalam tab Buat Suara — Studio punya alur sendiri
+ * (editor naskah + pemetaan suara + generate + pratinjau + proyek).
  */
 @Composable
 fun StudioTab(vm: AppViewModel, controller: PlayerController) {
     val context = LocalContext.current
 
-    Text("Studio Dialog", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-    Spacer(Modifier.height(8.dp))
+    // Auto-play pratinjau (v1.6.0): tiap file pratinjau BARU langsung
+    // diputar sekali. Guard `lastAutoPlayedPath` supaya recomposition
+    // tidak memutar ulang, dan supaya pause manual user tidak dilawan
+    // (efek hanya jalan saat path berubah — file baru = path baru,
+    // karena nama file pratinjau pakai stempel sampai detik).
+    var lastAutoPlayedPath by remember { mutableStateOf<String?>(null) }
+    val previewFile = vm.studioPreviewFile
+    LaunchedEffect(previewFile?.absolutePath) {
+        val f = previewFile
+        if (f != null && f.absolutePath != lastAutoPlayedPath) {
+            lastAutoPlayedPath = f.absolutePath
+            controller.play(f)
+        }
+    }
+
+    SectionTitle("Studio Dialog")
     Text(
-        "Dialog multi-suara (Supertonic AI, offline). Satu baris = satu suara. " +
+        "Dialog multi-suara multi-engine. Satu baris = satu suara. " +
             "Format: \"Nama: kalimat...\" — baris tanpa nama = lanjutan speaker sebelumnya. " +
-            "Baris kosong = jeda. Token [jeda] = 0,8 dtk, [jeda 2s] = jeda 2 dtk.",
+            "Baris kosong = jeda. Token [jeda] = 0,8 dtk, [jeda 2s] = jeda 2 dtk. " +
+            "Tiap speaker bisa pakai engine sendiri (lihat di bawah).",
         style = MaterialTheme.typography.bodySmall, color = SkTextDim
     )
     Spacer(Modifier.height(10.dp))
@@ -82,17 +109,15 @@ fun StudioTab(vm: AppViewModel, controller: PlayerController) {
     )
 
     if (vm.studioSpeakers.isNotEmpty()) {
-        Spacer(Modifier.height(14.dp))
-        Text("Suara per Speaker", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(SectionGap))
+        SectionTitle("Mesin + Suara per Speaker")
+        Text(
+            "Supertonic = offline (butuh model, 10 suara). Gemini = ekspresif (butuh API key, tiap segmen = request API sendiri). Edge = gratis (butuh internet). Offline = Piper / TTS sistem.",
+            style = MaterialTheme.typography.bodySmall, color = SkTextDim
+        )
         Spacer(Modifier.height(8.dp))
         vm.studioSpeakers.forEach { speaker ->
-            val sid = vm.studioVoiceMap[speaker] ?: SupertonicTtsEngine.DEFAULT_SID
-            VoiceDropdown(
-                label = speaker,
-                voices = SupertonicTtsEngine.VOICES,
-                selected = SupertonicTtsEngine.voiceLabel(sid),
-                onSelect = { label -> vm.updateStudioVoice(speaker, SupertonicTtsEngine.VOICES.indexOf(label)) }
-            )
+            StudioSpeakerCard(vm, speaker)
             Spacer(Modifier.height(8.dp))
         }
     }
@@ -101,10 +126,19 @@ fun StudioTab(vm: AppViewModel, controller: PlayerController) {
     Text("Kecepatan: ${"%.1f".format(vm.speed)}x", style = MaterialTheme.typography.bodyMedium)
     Slider(value = vm.speed, onValueChange = { vm.speed = it }, valueRange = 0.5f..2.0f)
 
-    if (!vm.supertonicReady) {
+    // Prasyarat sesuai engine yang DIPAKAI naskah (bukan global Supertonic).
+    val usedEngines = vm.studioEnginesUsed()
+    if (StudioVoices.ENGINE_GEMINI in usedEngines && !vm.hasGeminiKey) {
         Spacer(Modifier.height(8.dp))
         Text(
-            "Model Supertonic belum diunduh — Studio butuh model itu. Buka tab Buat Suara, pilih Supertonic (AI), lalu unduh modelnya (sekitar 123 MB, sekali saja).",
+            "Ada speaker Gemini tapi API key Gemini belum diisi — buka Pengaturan (ikon gerigi di atas).",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error
+        )
+    }
+    if (StudioVoices.ENGINE_SUPERTONIC in usedEngines && !vm.supertonicReady) {
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Ada speaker Supertonic tapi model Supertonic belum diunduh — buka tab Buat Suara, pilih Supertonic (AI), lalu unduh modelnya (sekitar 123 MB, sekali saja).",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error
         )
     }
@@ -112,8 +146,8 @@ fun StudioTab(vm: AppViewModel, controller: PlayerController) {
     Spacer(Modifier.height(10.dp))
     Button(
         onClick = { vm.generateStudio() },
-        enabled = !vm.studioGenerating && vm.studioSegments.isNotEmpty() && vm.supertonicReady,
-        modifier = Modifier.fillMaxWidth()
+        enabled = !vm.studioGenerating && vm.studioSegments.isNotEmpty(),
+        modifier = Modifier.fillMaxWidth().height(52.dp)
     ) {
         Text("GENERATE STUDIO")
     }
@@ -130,7 +164,7 @@ fun StudioTab(vm: AppViewModel, controller: PlayerController) {
     }
     vm.error?.let { err ->
         Spacer(Modifier.height(10.dp))
-        Card(colors = CardDefaults.cardColors(containerColor = StudioErrorContainer), modifier = Modifier.fillMaxWidth()) {
+        Card(colors = CardDefaults.cardColors(containerColor = SkErrorContainer), modifier = Modifier.fillMaxWidth()) {
             Text(err, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
         }
     }
@@ -140,9 +174,8 @@ fun StudioTab(vm: AppViewModel, controller: PlayerController) {
     }
 
     if (vm.studioRunItems.isNotEmpty()) {
-        Spacer(Modifier.height(14.dp))
-        Text("Segmen", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(SectionGap))
+        SectionTitle("Segmen")
         vm.studioRunItems.forEach { item ->
             StudioSegmentRow(vm, item)
             Spacer(Modifier.height(6.dp))
@@ -150,9 +183,8 @@ fun StudioTab(vm: AppViewModel, controller: PlayerController) {
     }
 
     vm.lastStudioWav?.let { wav ->
-        Spacer(Modifier.height(14.dp))
-        Text("Hasil Studio", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(SectionGap))
+        SectionTitle("Hasil Studio")
         AudioPlayerBar(controller, wav)
         vm.lastStudioSrt?.let { srt ->
             Spacer(Modifier.height(4.dp))
@@ -176,18 +208,21 @@ fun StudioTab(vm: AppViewModel, controller: PlayerController) {
         }
     }
 
-    vm.studioPreviewFile?.let { file ->
-        Spacer(Modifier.height(14.dp))
-        Text("Pratinjau Baris", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    previewFile?.let { file ->
+        Spacer(Modifier.height(SectionGap))
+        SectionTitle("Pratinjau Baris")
+        Text(
+            "Pratinjau langsung berbunyi setelah dibuat. Pakai player di bawah untuk memutar ulang / jeda.",
+            style = MaterialTheme.typography.bodySmall, color = SkTextDim
+        )
         Spacer(Modifier.height(8.dp))
         AudioPlayerBar(controller, file)
     }
 
-    Spacer(Modifier.height(16.dp))
-    Text("Proyek Studio", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-    Spacer(Modifier.height(8.dp))
+    Spacer(Modifier.height(SectionGap))
+    SectionTitle("Proyek Studio")
     Text(
-        "Simpan naskah + pemetaan suara + kecepatan sebagai proyek Studio (terpisah dari proyek biasa).",
+        "Simpan naskah + pemetaan mesin/suara + kecepatan sebagai proyek Studio (terpisah dari proyek biasa).",
         style = MaterialTheme.typography.bodySmall, color = SkTextDim
     )
     Spacer(Modifier.height(10.dp))
@@ -201,18 +236,85 @@ fun StudioTab(vm: AppViewModel, controller: PlayerController) {
         singleLine = true
     )
     Spacer(Modifier.height(8.dp))
-    Button(onClick = { vm.saveStudioProject() }, modifier = Modifier.fillMaxWidth()) {
+    Button(onClick = { vm.saveStudioProject() }, modifier = Modifier.fillMaxWidth().height(52.dp)) {
         Icon(Icons.Filled.Folder, contentDescription = null)
         Spacer(Modifier.width(6.dp))
         Text("SIMPAN PROYEK STUDIO")
     }
     Spacer(Modifier.height(12.dp))
     if (vm.studioProjects.isEmpty()) {
-        Text("Belum ada proyek Studio tersimpan.", color = SkTextDim)
+        EmptyStateCard(Icons.Filled.Folder, "Belum ada proyek Studio tersimpan.")
     } else {
         vm.studioProjects.forEach { project ->
             StudioProjectCard(vm, project)
             Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+/** Kartu satu speaker: dropdown mesin + dropdown suara engine itu. */
+@Composable
+private fun StudioSpeakerCard(vm: AppViewModel, speaker: String) {
+    val voice = vm.studioVoiceMap[speaker]
+        ?: StudioVoices.defaultVoiceFor(StudioVoices.ENGINE_SUPERTONIC)
+    val engineLabels = StudioVoices.ENGINES.map { StudioVoices.engineLabel(it) }
+    Card(colors = CardDefaults.cardColors(containerColor = SkSurface), modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(speaker, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            VoiceDropdown(
+                label = "Mesin",
+                voices = engineLabels,
+                selected = StudioVoices.engineLabel(voice.engine),
+                onSelect = { label ->
+                    val idx = engineLabels.indexOf(label)
+                    if (idx >= 0) vm.updateStudioEngine(speaker, StudioVoices.ENGINES[idx])
+                }
+            )
+            Spacer(Modifier.height(8.dp))
+            when (voice.engine) {
+                StudioVoices.ENGINE_SUPERTONIC -> {
+                    val sid = StudioVoices.sidOf(voice) ?: SupertonicTtsEngine.DEFAULT_SID
+                    VoiceDropdown(
+                        label = "Suara Supertonic",
+                        voices = SupertonicTtsEngine.VOICES,
+                        selected = SupertonicTtsEngine.voiceLabel(sid),
+                        onSelect = { label ->
+                            val idx = SupertonicTtsEngine.VOICES.indexOf(label)
+                            if (idx >= 0) vm.updateStudioVoice(
+                                speaker,
+                                StudioVoice(StudioVoices.ENGINE_SUPERTONIC, idx.toString())
+                            )
+                        }
+                    )
+                }
+                StudioVoices.ENGINE_GEMINI -> {
+                    VoiceDropdown(
+                        label = "Suara Gemini",
+                        voices = GeminiTtsEngine.VOICES,
+                        selected = voice.voice.ifEmpty { GeminiTtsEngine.VOICES.first() },
+                        onSelect = { label ->
+                            vm.updateStudioVoice(speaker, StudioVoice(StudioVoices.ENGINE_GEMINI, label))
+                        }
+                    )
+                }
+                StudioVoices.ENGINE_EDGE -> {
+                    VoiceDropdown(
+                        label = "Suara Edge",
+                        voices = EdgeTtsEngine.VOICES,
+                        selected = voice.voice.ifEmpty { EdgeTtsEngine.VOICES.first() },
+                        onSelect = { label ->
+                            vm.updateStudioVoice(speaker, StudioVoice(StudioVoices.ENGINE_EDGE, label))
+                        }
+                    )
+                }
+                else -> {
+                    Text(
+                        "Otomatis: Piper (kalau model terpasang), kalau tidak TTS sistem.",
+                        style = MaterialTheme.typography.bodySmall, color = SkTextDim
+                    )
+                }
+            }
         }
     }
 }
@@ -258,12 +360,19 @@ private fun StudioSegmentRow(vm: AppViewModel, item: StudioRunItem) {
 
 @Composable
 private fun StudioProjectCard(vm: AppViewModel, project: StudioProject) {
+    // v1.6.0: tampilkan pemetaan engine+suara; proyek v1.5.0 (tanpa
+    // engineMap) jatuh ke voiceMap lama sebagai Supertonic.
+    val voicesText = if (project.engineMap.isNotEmpty()) {
+        project.engineMap.entries.joinToString(", ") { (s, v) -> "$s: ${StudioVoices.voiceLabel(v)}" }
+    } else {
+        project.voiceMap.entries.joinToString(", ") { (s, sid) -> "$s: Suara ${sid + 1}" }
+    }
     Card(colors = CardDefaults.cardColors(containerColor = SkSurface), modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text(project.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(4.dp))
             Text(
-                project.voiceMap.entries.joinToString(", ") { (s, sid) -> "$s: Suara ${sid + 1}" },
+                voicesText,
                 style = MaterialTheme.typography.bodySmall, color = SkTextDim
             )
             Text(

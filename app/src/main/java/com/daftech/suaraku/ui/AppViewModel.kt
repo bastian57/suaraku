@@ -28,10 +28,11 @@ import com.daftech.suaraku.studio.SrtCue
 import com.daftech.suaraku.studio.StudioRunItem
 import com.daftech.suaraku.studio.StudioSegment
 import com.daftech.suaraku.studio.StudioSegmentStatus
+import com.daftech.suaraku.studio.StudioVoice
+import com.daftech.suaraku.studio.StudioVoices
 import com.daftech.suaraku.studio.buildSrt
 import com.daftech.suaraku.studio.parseStudioScript
 import com.daftech.suaraku.studio.speakersOf
-import com.daftech.suaraku.studio.validateVoiceMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -353,11 +354,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ---- Studio dialog (v1.5.0, Supertonic-only) ----
+    // ---- Studio dialog (v1.5.0 Supertonic-only; v1.6.0 multi-engine) ----
     var studioScript by mutableStateOf("")
     var studioSegments by mutableStateOf<List<StudioSegment>>(emptyList())
     var studioSpeakers by mutableStateOf<List<String>>(emptyList())
-    var studioVoiceMap by mutableStateOf<Map<String, Int>>(emptyMap())
+    /** Pemetaan speaker -> engine + suara (v1.6.0; dulu Map<String, Int> sid Supertonic). */
+    var studioVoiceMap by mutableStateOf<Map<String, StudioVoice>>(emptyMap())
     var studioGenerating by mutableStateOf(false)
     var studioProgressText by mutableStateOf("")
     var studioProgressFraction by mutableStateOf(0f)
@@ -383,8 +385,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Set naskah Studio + hitung ulang segmen/speaker. Pemetaan suara lama
      * dipertahankan untuk speaker yang masih ada (cocok tanpa peduli huruf);
-     * speaker baru mendapat sid default dari urutan DEFAULT_SIDS yang
-     * belum dipakai. Parser tidak melempar untuk teks biasa.
+     * speaker baru mendapat pemetaan default (Supertonic + sid dari urutan
+     * DEFAULT_SIDS yang belum dipakai — persis perilaku v1.5.0).
+     * Parser tidak melempar untuk teks biasa.
      */
     fun updateStudioScript(script: String) {
         studioScript = script
@@ -400,42 +403,169 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             error = "Maksimal $MAX_SPEAKERS speaker dalam satu naskah studio, dapat ${speakers.size}"
         }
         val oldByLower = studioVoiceMap.entries.associateBy { it.key.lowercase() }
-        val fresh = mutableMapOf<String, Int>()
-        val used = mutableSetOf<Int>()
+        val fresh = mutableMapOf<String, StudioVoice>()
+        val usedSids = mutableSetOf<Int>()
         for (name in speakers) {
             val kept = oldByLower[name.lowercase()]?.value
-            if (kept != null && kept in 0..9) {
+            if (kept != null && StudioVoices.isKnownEngine(kept.engine)) {
                 fresh[name] = kept
-                used.add(kept)
+                StudioVoices.sidOf(kept)?.let { usedSids.add(it) }
             }
         }
         for (name in speakers) {
             if (name !in fresh) {
-                val sid = DEFAULT_SIDS.firstOrNull { it !in used }
+                val sid = DEFAULT_SIDS.firstOrNull { it !in usedSids }
                 if (sid != null) {
-                    fresh[name] = sid
-                    used.add(sid)
+                    fresh[name] = StudioVoice(StudioVoices.ENGINE_SUPERTONIC, sid.toString())
+                    usedSids.add(sid)
                 }
             }
         }
         studioVoiceMap = fresh
     }
 
-    /** Ubah suara satu speaker Studio (sid 0..9); nilai di luar rentang/speaker asing diabaikan. */
-    fun updateStudioVoice(speaker: String, sid: Int) {
-        if (!SupertonicTtsEngine.isValidSid(sid)) return
+    /**
+     * Ubah suara satu speaker Studio (engine + suara). Engine tidak dikenal,
+     * suara tidak valid untuk engine itu, atau speaker asing -> diabaikan.
+     */
+    fun updateStudioVoice(speaker: String, voice: StudioVoice) {
         if (speaker !in studioSpeakers) return
-        studioVoiceMap = studioVoiceMap + (speaker to sid)
+        if (!StudioVoices.isKnownEngine(voice.engine)) return
+        val valid = when (voice.engine) {
+            StudioVoices.ENGINE_SUPERTONIC -> StudioVoices.sidOf(voice) != null
+            StudioVoices.ENGINE_GEMINI -> voice.voice in GeminiTtsEngine.VOICES
+            StudioVoices.ENGINE_EDGE -> voice.voice in EdgeTtsEngine.VOICES
+            else -> true // OFFLINE: suara diabaikan
+        }
+        if (!valid) return
+        studioVoiceMap = studioVoiceMap + (speaker to voice)
     }
 
     /**
-     * Generate Studio: tiap segmen dialog di-generate Supertonic (chunk
-     * DirectorPass per baris, sid per speaker), jeda = hening WAV 44.100 Hz,
-     * lalu semua segmen digabung jadi SATU WAV + SRT berdampingan.
-     * Segmen gagal TIDAK menghentikan antrean (dilewati — tidak ada audio
-     * dan tidak ada cue SRT untuk segmen itu); ringkasan akhir menyebut
-     * segmen yang gagal. Semua penulisan Compose state terjadi di Main
-     * thread (loop jalan di viewModelScope/Main, IO hanya di withContext).
+     * Ganti engine satu speaker Studio (suara ikut direset ke default engine
+     * itu — kecuali pindah ke Supertonic: sid lama dipertahankan bila ada).
+     */
+    fun updateStudioEngine(speaker: String, engine: String) {
+        if (speaker !in studioSpeakers) return
+        if (!StudioVoices.isKnownEngine(engine)) return
+        val current = studioVoiceMap[speaker]
+        val next = if (engine == StudioVoices.ENGINE_SUPERTONIC && current?.engine == StudioVoices.ENGINE_SUPERTONIC) {
+            current
+        } else {
+            val fallbackSid = DEFAULT_SIDS.firstOrNull { sid ->
+                sid.toString() !in studioVoiceMap.values
+                    .filter { it.engine == StudioVoices.ENGINE_SUPERTONIC }
+                    .map { it.voice }
+            } ?: SupertonicTtsEngine.DEFAULT_SID
+            StudioVoices.defaultVoiceFor(engine, fallbackSid)
+        }
+        studioVoiceMap = studioVoiceMap + (speaker to next)
+    }
+
+    /** Engine yang dipakai naskah saat ini (untuk prasyarat + ringkasan). */
+    fun studioEnginesUsed(): Set<String> =
+        studioVoiceMap.values.map { it.engine }.toSet()
+
+    /**
+     * Prasyarat engine yang dipakai naskah: kunci Gemini (bila ada speaker
+     * Gemini) + model Supertonic (bila ada speaker Supertonic). Mengembalikan
+     * pesan error, atau null bila semua prasyarat terpenuhi. Edge + Offline
+     * tidak punya prasyarat awal (Edge gagal per segmen bila tanpa internet;
+     * Offline jatuh ke TTS sistem bila model Piper belum terpasang).
+     */
+    fun validateStudioPrerequisites(): String? {
+        val used = studioEnginesUsed()
+        if (StudioVoices.ENGINE_GEMINI in used && prefs.geminiKey.isBlank()) {
+            return "Ada speaker Gemini tapi API key Gemini belum diisi. Buka Pengaturan (ikon gerigi) lalu tempel API key Gemini milikmu sendiri."
+        }
+        if (StudioVoices.ENGINE_SUPERTONIC in used && !SupertonicTtsEngine.isReady(ctx)) {
+            return "Ada speaker Supertonic tapi model Supertonic belum diunduh. Buka tab Buat Suara, pilih Supertonic (AI), lalu unduh modelnya (sekitar 123 MB, sekali saja)."
+        }
+        return null
+    }
+
+    /**
+     * Generate SATU baris dialog Studio dengan engine speaker itu
+     * (v1.6.0 multi-engine). Menulis output mentah engine ke [outTmp]:
+     * Gemini -> WAV PCM16 24 kHz; Edge -> MP3 24 kHz; Supertonic -> WAV
+     * 44,1 kHz; Offline -> WAV (Piper ~22,05 kHz, atau TTS sistem).
+     * Konversi ke 44,1 kHz dilakukan pemanggil
+     * ([WavUtil.convertToWav44100]). Studio TIDAK memakai preset
+     * voice-over/emosi (gaya dialog = naskahnya sendiri); chunking
+     * DirectorPass tetap berlaku per baris. Kuota: tiap baris Gemini =
+     * 1 request API per chunk (bukan 1 request per naskah).
+     * Harus dipanggil dari coroutine (IO di dalam dengan withContext).
+     */
+    private suspend fun synthesizeStudioDialogue(voice: StudioVoice, text: String, outTmp: File) {
+        val engine = voice.engine
+        val chunks = DirectorPass.chunkFor(engine, text, directorEnabled)
+        if (chunks.isEmpty()) throw IllegalStateException("Baris kosong setelah dibersihkan")
+        when (engine) {
+            StudioVoices.ENGINE_GEMINI -> {
+                val key = prefs.geminiKey
+                if (key.isBlank()) throw IllegalStateException(
+                    "API key Gemini belum diisi. Buka Pengaturan (ikon gerigi) lalu tempel API key Gemini milikmu sendiri."
+                )
+                withContext(Dispatchers.IO) {
+                    GeminiTtsEngine.synthesize(key, prefs.geminiModel, chunks, voice.voice, outTmp) { _, _ -> }
+                }
+            }
+            StudioVoices.ENGINE_EDGE -> {
+                // Studio tidak memakai preset VO/emosi: pakai preset netral,
+                // hanya kecepatan slider + nada tab utama yang diteruskan.
+                val vo = Presets.voById("umum")
+                val preset = Presets.byId("netral")
+                val rate = Presets.edgeRate(vo, preset, speed)
+                val pitch = Presets.edgePitch(vo, preset, pitchPercent)
+                val volume = Presets.edgeVolume(vo, preset)
+                withContext(Dispatchers.IO) {
+                    EdgeTtsEngine.synthesize(chunks, voice.voice, rate, pitch, volume, outTmp) { _, _ -> }
+                }
+            }
+            StudioVoices.ENGINE_SUPERTONIC -> {
+                if (!SupertonicTtsEngine.isReady(ctx)) throw IllegalStateException(
+                    "Model Supertonic belum diunduh. Buka tab Buat Suara, pilih Supertonic (AI), lalu unduh modelnya (sekitar 123 MB, sekali saja)."
+                )
+                val sid = StudioVoices.sidOf(voice)
+                    ?: throw IllegalStateException("Suara Supertonic tidak valid (\"${voice.voice}\", harus sid 0..9)")
+                withContext(Dispatchers.IO) {
+                    SupertonicTtsEngine.synthesize(ctx, chunks, sid, speed, outTmp) { _, _ -> }
+                }
+            }
+            StudioVoices.ENGINE_OFFLINE -> {
+                val pitchFactor = Presets.offlinePitchFactor(Presets.voById("umum"), Presets.byId("netral"), pitchPercent)
+                var usedSystemFallback = false
+                if (SherpaTtsEngine.isReady(ctx)) {
+                    try {
+                        withContext(Dispatchers.IO) {
+                            SherpaTtsEngine.synthesize(ctx, chunks, speed, outTmp) { _, _ -> }
+                        }
+                    } catch (e: Exception) {
+                        usedSystemFallback = true
+                    }
+                } else {
+                    usedSystemFallback = true
+                }
+                if (usedSystemFallback) {
+                    withContext(Dispatchers.IO) {
+                        SystemTtsEngine(ctx).synthesize(chunks, speed, pitchFactor, outTmp) { _, _ -> }
+                    }
+                }
+            }
+            else -> throw IllegalStateException("Mesin Studio tidak dikenal (\"$engine\")")
+        }
+    }
+
+    /**
+     * Generate Studio: tiap segmen dialog di-generate dengan engine
+     * speaker-nya (v1.6.0 multi-engine; v1.5.0 Supertonic-only),
+     * lalu tiap segmen diubah ke WAV PCM16 mono 44.100 Hz, jeda =
+     * hening WAV 44.100 Hz, dan semua segmen digabung jadi SATU WAV +
+     * SRT berdampingan. Segmen gagal TIDAK menghentikan antrean
+     * (dilewati — tidak ada audio dan tidak ada cue SRT untuk segmen
+     * itu); ringkasan akhir menyebut segmen yang gagal. Semua penulisan
+     * Compose state terjadi di Main thread (loop jalan di
+     * viewModelScope/Main, IO hanya di withContext).
      */
     fun generateStudio() {
         if (generating || batchRunning || studioGenerating) return
@@ -444,11 +574,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             error = "Naskah Studio masih kosong — tulis dialog dengan format \"Nama: kalimat...\"."
             return
         }
-        validateVoiceMap(studioSpeakers, studioVoiceMap)?.let { error = it; return }
-        if (!SupertonicTtsEngine.isReady(ctx)) {
-            error = "Model Supertonic belum diunduh. Buka tab Buat Suara, pilih Supertonic (AI), lalu unduh modelnya (sekitar 123 MB, sekali saja)."
-            return
-        }
+        StudioVoices.validateVoiceMap(
+            studioSpeakers, studioVoiceMap,
+            GeminiTtsEngine.VOICES, EdgeTtsEngine.VOICES
+        )?.let { error = it; return }
+        validateStudioPrerequisites()?.let { error = it; return }
         studioGenerating = true
         error = null
         info = null
@@ -474,26 +604,33 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     studioProgressText = "Segmen ${idx + 1} dari ${segments.size} — $label"
                     studioProgressFraction = idx.toFloat() / segments.size
                     try {
-                        val tmp = File(segDir, "seg_%02d.wav".format(idx))
-                        val durationMs = withContext(Dispatchers.IO) {
+                        // Tiap segmen berakhir sebagai file WAV PCM16 mono 44,1 kHz
+                        // di segDir (dialog: hasil konversi; jeda: hening).
+                        val (partFile, durationMs) = withContext(Dispatchers.IO) {
                             when (seg) {
                                 is StudioSegment.Dialogue -> {
-                                    val sid = studioVoiceMap[seg.speaker]
-                                        ?: throw IllegalStateException("Speaker \"${seg.speaker}\" belum dipetakan ke suara")
-                                    val chunks = DirectorPass.chunkFor("SUPERTONIC", seg.text, directorEnabled)
-                                    if (chunks.isEmpty()) throw IllegalStateException("Baris kosong setelah dibersihkan")
-                                    SupertonicTtsEngine.synthesize(ctx, chunks, sid, speed, tmp) { _, _ -> }
-                                    val d = WavUtil.wavDurationMs(tmp)
+                                    val voice = studioVoiceMap[seg.speaker]
+                                        ?: throw IllegalStateException("Speaker \"${seg.speaker}\" belum dipetakan ke mesin + suara")
+                                    val raw = File(segDir, "seg_%02d_raw.${if (voice.engine == StudioVoices.ENGINE_EDGE) "mp3" else "wav"}".format(idx))
+                                    synthesizeStudioDialogue(voice, seg.text, raw)
+                                    // Semua segmen diseragamkan ke WAV PCM16 mono 44,1 kHz.
+                                    val converted = File(segDir, "seg_%02d.wav".format(idx))
+                                    if (!WavUtil.convertToWav44100(raw, converted)) {
+                                        throw IllegalStateException("Segmen \"${seg.speaker}\" gagal diubah ke 44,1 kHz (decode/resample gagal)")
+                                    }
+                                    val d = WavUtil.wavDurationMs(converted)
                                     if (d < 0) throw IllegalStateException("File audio segmen tidak terbaca")
-                                    d
+                                    raw.delete()
+                                    converted to d
                                 }
                                 is StudioSegment.Pause -> {
-                                    WavUtil.writeSilenceToWav(tmp, seg.seconds, 44100)
-                                    (seg.seconds * 1000).toLong()
+                                    val silence = File(segDir, "seg_%02d.wav".format(idx))
+                                    WavUtil.writeSilenceToWav(silence, seg.seconds, 44100)
+                                    silence to (seg.seconds * 1000).toLong()
                                 }
                             }
                         }
-                        okParts.add(Triple(idx, tmp, durationMs))
+                        okParts.add(Triple(idx, partFile, durationMs))
                         studioRunItems = studioRunItems.map {
                             if (it.index == idx) it.copy(status = StudioSegmentStatus.DONE) else it
                         }
@@ -528,8 +665,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 val okCount = okParts.size
                 studioSummary = "$okCount berhasil, ${failed.size} gagal dari ${segments.size} segmen" +
                     if (failed.isNotEmpty()) " — gagal: ${failed.joinToString(", ")}" else ""
-                info = "Studio selesai: ${outWav.name} (${outWav.length() / 1024} KB) + ${outSrt.name}\n" +
-                    "Suara AI (Supertonic 3, OpenRAIL-M) — output machine-generated."
+                val usedLabels = studioEnginesUsed().map { StudioVoices.engineLabel(it) }
+                var infoText = "Studio selesai: ${outWav.name} (${outWav.length() / 1024} KB) + ${outSrt.name}\n" +
+                    "Engine dipakai: ${usedLabels.joinToString(", ")}."
+                if (StudioVoices.ENGINE_SUPERTONIC in studioEnginesUsed()) {
+                    infoText += "\nSuara AI (Supertonic 3, OpenRAIL-M) — output machine-generated."
+                }
+                if (StudioVoices.ENGINE_GEMINI in studioEnginesUsed()) {
+                    infoText += "\nCatatan kuota: tiap segmen Gemini = request API sendiri (kuota free ±15/hari)."
+                }
+                info = infoText
                 refreshStatus()
             } catch (e: Exception) {
                 error = e.message ?: "Studio gagal tanpa pesan"
@@ -540,14 +685,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Pratinjau satu baris dialog Studio (generate HANYA baris itu). */
+    /** Pratinjau satu baris dialog Studio (generate HANYA baris itu, dengan engine speaker-nya). */
     fun previewStudioLine(index: Int) {
         if (generating || batchRunning || studioGenerating) return
         val seg = studioSegments.getOrNull(index) as? StudioSegment.Dialogue
             ?: run { error = "Hanya baris dialog yang bisa dipratinjau."; return }
-        val sid = studioVoiceMap[seg.speaker]
-            ?: run { error = "Speaker \"${seg.speaker}\" belum dipetakan ke suara."; return }
-        if (!SupertonicTtsEngine.isReady(ctx)) {
+        val voice = studioVoiceMap[seg.speaker]
+            ?: run { error = "Speaker \"${seg.speaker}\" belum dipetakan ke mesin + suara."; return }
+        StudioVoices.validateVoiceMap(
+            listOf(seg.speaker), mapOf(seg.speaker to voice),
+            GeminiTtsEngine.VOICES, EdgeTtsEngine.VOICES
+        )?.let { error = it; return }
+        if (voice.engine == StudioVoices.ENGINE_GEMINI && prefs.geminiKey.isBlank()) {
+            error = "API key Gemini belum diisi. Buka Pengaturan (ikon gerigi) lalu tempel API key Gemini milikmu sendiri."
+            return
+        }
+        if (voice.engine == StudioVoices.ENGINE_SUPERTONIC && !SupertonicTtsEngine.isReady(ctx)) {
             error = "Model Supertonic belum diunduh. Buka tab Buat Suara, pilih Supertonic (AI), lalu unduh modelnya."
             return
         }
@@ -555,14 +708,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             error = null
             studioProgressText = "Pratinjau: ${seg.speaker}..."
             try {
-                val chunks = DirectorPass.chunkFor("SUPERTONIC", seg.text, directorEnabled)
-                if (chunks.isEmpty()) throw IllegalStateException("Baris kosong setelah dibersihkan")
-                val out = AudioStore.newStudioPreviewFile(ctx)
-                withContext(Dispatchers.IO) {
-                    SupertonicTtsEngine.synthesize(ctx, chunks, sid, speed, out) { _, _ -> }
+                val raw = withContext(Dispatchers.IO) {
+                    val segDir = File(ctx.cacheDir, "studio-segments")
+                    if (!segDir.exists()) segDir.mkdirs()
+                    val rawFile = File(segDir, "preview_raw.${if (voice.engine == StudioVoices.ENGINE_EDGE) "mp3" else "wav"}")
+                    synthesizeStudioDialogue(voice, seg.text, rawFile)
+                    rawFile
                 }
-                studioPreviewFile = out
-                studioProgressText = "Pratinjau siap: ${seg.speaker} (${out.length() / 1024} KB)"
+                val out = AudioStore.newStudioPreviewFile(ctx)
+                val converted = withContext(Dispatchers.IO) {
+                    if (!WavUtil.convertToWav44100(raw, out)) {
+                        throw IllegalStateException("Pratinjau gagal diubah ke 44,1 kHz (decode/resample gagal)")
+                    }
+                    raw.delete()
+                    out
+                }
+                studioPreviewFile = converted
+                studioProgressText = "Pratinjau siap: ${seg.speaker} (${converted.length() / 1024} KB)"
                 refreshStatus()
             } catch (e: Exception) {
                 error = e.message ?: "Pratinjau gagal tanpa pesan"
@@ -602,14 +764,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         val name = studioProjectName.trim().ifEmpty { ProjectStore.defaultName(raw) }
+        // voiceMap legacy = sid Supertonic saja (untuk pembaca lama);
+        // engineMap = pemetaan lengkap v1.6.0.
+        val legacySids = studioVoiceMap.entries.mapNotNull { (speaker, voice) ->
+            StudioVoices.sidOf(voice)?.let { speaker to it }
+        }.toMap()
         StudioProjectStore.save(
             ctx,
             StudioProject(
                 name = name,
                 script = raw,
-                voiceMap = studioVoiceMap,
+                voiceMap = legacySids,
                 speed = speed,
-                savedAt = System.currentTimeMillis()
+                savedAt = System.currentTimeMillis(),
+                engineMap = studioVoiceMap
             )
         )
         studioProjectName = ""
@@ -622,9 +790,28 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         speed = p.speed
         updateStudioScript(p.script)
         val applied = studioVoiceMap.toMutableMap()
-        p.voiceMap.forEach { (speaker, sid) ->
-            val match = studioSpeakers.firstOrNull { it.equals(speaker, ignoreCase = true) }
-            if (match != null && sid in 0..9) applied[match] = sid
+        // v1.6.0: utamakan engineMap; proyek v1.5.0 (tanpa engineMap) jatuh
+        // ke voiceMap lama sebagai Supertonic.
+        if (p.engineMap.isNotEmpty()) {
+            p.engineMap.forEach { (speaker, voice) ->
+                val match = studioSpeakers.firstOrNull { it.equals(speaker, ignoreCase = true) }
+                if (match != null && StudioVoices.isKnownEngine(voice.engine)) {
+                    val valid = when (voice.engine) {
+                        StudioVoices.ENGINE_SUPERTONIC -> StudioVoices.sidOf(voice) != null
+                        StudioVoices.ENGINE_GEMINI -> voice.voice in GeminiTtsEngine.VOICES
+                        StudioVoices.ENGINE_EDGE -> voice.voice in EdgeTtsEngine.VOICES
+                        else -> true
+                    }
+                    if (valid) applied[match] = voice
+                }
+            }
+        } else {
+            p.voiceMap.forEach { (speaker, sid) ->
+                val match = studioSpeakers.firstOrNull { it.equals(speaker, ignoreCase = true) }
+                if (match != null && sid in 0..9) {
+                    applied[match] = StudioVoice(StudioVoices.ENGINE_SUPERTONIC, sid.toString())
+                }
+            }
         }
         studioVoiceMap = applied
         error = null

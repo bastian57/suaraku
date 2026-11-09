@@ -93,6 +93,16 @@ class PlayerController {
             if (p.isPlaying) { p.pause(); isPlaying = false } else { p.start(); isPlaying = true }
             return
         }
+        play(file)
+    }
+
+    /**
+     * Putar [file] dari awal — SELALU mulai fresh (lepas player lama dulu),
+     * tidak peduli file itu sedang diputar atau tidak. Dipakai auto-play
+     * pratinjau Studio (v1.6.0): pratinjau baru harus bunyi, bukan malah
+     * pause/resume file lama.
+     */
+    fun play(file: File) {
         releasePlayer()
         val p = MediaPlayer()
         player = p
@@ -176,6 +186,39 @@ private fun fmtTime(ms: Int): String {
     return "%d:%02d".format(s / 60, s % 60)
 }
 
+/**
+ * Judul seksi (v1.6.0, polish UI): satu gaya untuk semua tab — teks
+ * titleMedium tebal + spasi 8dp sesudahnya. Dipakai GeneratorTab,
+ * HistoryTab, ProjectsTab, StudioTab, dan SettingsScreen supaya jarak
+ * dan tipografi konsisten (sebelumnya tiap tab memakai Spacer 6/8/10/14
+ * yang berbeda-beda).
+ */
+@Composable
+internal fun SectionTitle(text: String) {
+    Text(text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    Spacer(Modifier.height(8.dp))
+}
+
+/** Jarak antar-seksi besar (v1.6.0, polish UI): 20dp, dipakai konsisten. */
+internal val SectionGap = 20.dp
+
+/**
+ * Empty state (v1.6.0, polish UI): kartu dengan ikon + teks, supaya tab
+ * yang masih kosong tidak kelihatan mentah (hanya satu baris teks redup).
+ */
+@Composable
+internal fun EmptyStateCard(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String) {
+    Card(colors = CardDefaults.cardColors(containerColor = SkSurface), modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(icon, contentDescription = null, tint = SkGold, modifier = Modifier.padding(bottom = 8.dp))
+            Text(text, style = MaterialTheme.typography.bodyMedium, color = SkTextDim)
+        }
+    }
+}
+
 /* ---------------- Layar utama ---------------- */
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -253,7 +296,7 @@ fun MainScreen(onOpenSettings: () -> Unit) {
             }
             Spacer(Modifier.height(12.dp))
             Text(
-                "SuaraKu v1.5.0 — by DAFTECH • pemakaian pribadi",
+                "SuaraKu v1.6.0 — by DAFTECH • pemakaian pribadi",
                 style = MaterialTheme.typography.bodySmall, color = SkTextDim
             )
         }
@@ -289,8 +332,7 @@ internal fun VoiceDropdown(label: String, voices: List<String>, selected: String
 private fun GeneratorTab(vm: AppViewModel, controller: PlayerController, onImport: () -> Unit) {
     val context = LocalContext.current
 
-    Text("Mesin Suara", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-    Spacer(Modifier.height(8.dp))
+    SectionTitle("Mesin Suara")
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         FilterChip(
             selected = vm.engine == Prefs.ENGINE_GEMINI,
@@ -423,9 +465,8 @@ private fun GeneratorTab(vm: AppViewModel, controller: PlayerController, onImpor
         }
     }
 
-    Spacer(Modifier.height(14.dp))
-    Text("Preset Voice-Over (gaya dasar)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-    Spacer(Modifier.height(8.dp))
+    Spacer(Modifier.height(SectionGap))
+    SectionTitle("Preset Voice-Over (gaya dasar)")
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Presets.VO_PRESETS.take(3).forEach { p ->
             FilterChip(selected = vm.voPresetId == p.id, onClick = { vm.voPresetId = p.id }, label = { Text(p.label) })
@@ -438,9 +479,8 @@ private fun GeneratorTab(vm: AppViewModel, controller: PlayerController, onImpor
         }
     }
 
-    Spacer(Modifier.height(14.dp))
-    Text("Preset Ekspresi (pewarna)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-    Spacer(Modifier.height(8.dp))
+    Spacer(Modifier.height(SectionGap))
+    SectionTitle("Preset Ekspresi (pewarna)")
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Presets.ALL.take(3).forEach { p ->
             FilterChip(selected = vm.presetId == p.id, onClick = { vm.presetId = p.id }, label = { Text(p.label) })
@@ -557,7 +597,7 @@ private fun GeneratorTab(vm: AppViewModel, controller: PlayerController, onImpor
 
     vm.error?.let { err ->
         Spacer(Modifier.height(10.dp))
-        Card(colors = CardDefaults.cardColors(containerColor = ColorErrorContainer), modifier = Modifier.fillMaxWidth()) {
+        Card(colors = CardDefaults.cardColors(containerColor = SkErrorContainer), modifier = Modifier.fillMaxWidth()) {
             Text(err, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
         }
     }
@@ -567,9 +607,8 @@ private fun GeneratorTab(vm: AppViewModel, controller: PlayerController, onImpor
     }
 
     vm.lastFile?.let { file ->
-        Spacer(Modifier.height(14.dp))
-        Text("Hasil Terakhir", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(SectionGap))
+        SectionTitle("Hasil Terakhir")
         AudioPlayerBar(controller, file)
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -602,8 +641,7 @@ private fun batchStatusLabel(status: BatchStatus): String = when (status) {
 @Composable
 private fun BatchSection(vm: AppViewModel, controller: PlayerController) {
     Spacer(Modifier.height(20.dp))
-    Text("Batch Generate", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-    Spacer(Modifier.height(6.dp))
+    SectionTitle("Batch Generate")
     Text(
         "Pisahkan tiap bagian dengan BARIS KOSONG (atau garis ---). Tiap bagian jadi 1 file; bagian yang gagal tidak menghentikan antrean.",
         style = MaterialTheme.typography.bodySmall, color = SkTextDim
@@ -675,15 +713,12 @@ private fun BatchSection(vm: AppViewModel, controller: PlayerController) {
     }
 }
 
-private val ColorErrorContainer = androidx.compose.ui.graphics.Color(0xFF3A1D1D)
-
 @Composable
 private fun HistoryTab(vm: AppViewModel, controller: PlayerController) {
     val context = LocalContext.current
-    Text("Riwayat Hasil", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-    Spacer(Modifier.height(8.dp))
+    SectionTitle("Riwayat Hasil")
     if (vm.history.isEmpty()) {
-        Text("Belum ada hasil. Buat suara pertamamu di tab Buat Suara.", color = SkTextDim)
+        EmptyStateCard(Icons.Filled.InsertDriveFile, "Belum ada hasil. Buat suara pertamamu di tab Buat Suara.")
         return
     }
     vm.history.forEach { file ->
@@ -716,8 +751,7 @@ private fun fmtProjectDate(ms: Long): String =
 
 @Composable
 private fun ProjectsTab(vm: AppViewModel) {
-    Text("Proyek Tersimpan", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-    Spacer(Modifier.height(8.dp))
+    SectionTitle("Proyek Tersimpan")
     Text(
         "Simpan setup saat ini (teks + mesin + suara + preset) sebagai proyek, lalu muat lagi kapan pun.",
         style = MaterialTheme.typography.bodySmall, color = SkTextDim
@@ -739,9 +773,9 @@ private fun ProjectsTab(vm: AppViewModel) {
         Text("SIMPAN PROYEK INI")
     }
 
-    Spacer(Modifier.height(16.dp))
+    Spacer(Modifier.height(SectionGap))
     if (vm.projects.isEmpty()) {
-        Text("Belum ada proyek tersimpan.", color = SkTextDim)
+        EmptyStateCard(Icons.Filled.Folder, "Belum ada proyek tersimpan.")
         return
     }
     vm.projects.forEach { project ->

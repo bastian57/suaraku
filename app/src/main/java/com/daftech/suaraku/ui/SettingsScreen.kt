@@ -74,8 +74,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-            Text("API Key Gemini (milikmu sendiri)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(8.dp))
+            SectionTitle("API Key Gemini (milikmu sendiri)")
             OutlinedTextField(
                 value = keyText,
                 onValueChange = { keyText = it; vm.prefs.geminiKey = it; vm.hasGeminiKey = it.isNotBlank() },
@@ -92,8 +91,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             )
 
             Spacer(Modifier.height(20.dp))
-            Text("Model Gemini", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(8.dp))
+            SectionTitle("Model Gemini")
             ExposedDropdownMenuBox(expanded = modelExpanded, onExpandedChange = { modelExpanded = it }) {
                 OutlinedTextField(
                     value = models.firstOrNull { it.first == selectedModel }?.second ?: selectedModel,
@@ -111,8 +109,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
 
             Spacer(Modifier.height(20.dp))
-            Text("Mesin Bawaan (default)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(8.dp))
+            SectionTitle("Mesin Bawaan (default)")
             ExposedDropdownMenuBox(expanded = engineExpanded, onExpandedChange = { engineExpanded = it }) {
                 OutlinedTextField(
                     value = engines.firstOrNull { it.first == selectedEngine }?.second ?: selectedEngine,
@@ -135,11 +132,11 @@ fun SettingsScreen(onBack: () -> Unit) {
                     Text("Tentang", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "SuaraKu v1.5.0 (versionCode 6)\nby DAFTECH\n\n" +
+                        "SuaraKu v1.6.0 (versionCode 7)\nby DAFTECH\n\n" +
                             "Aplikasi text-to-voice pribadi: Gemini Ekspresif (online, key sendiri), " +
                             "Edge Gratis (tidak resmi, bisa berubah), Offline (Piper AI di HP / TTS sistem), " +
                             "dan Supertonic (AI) — Supertonic 3 Bahasa Indonesia, 10 suara, model diunduh on-demand (OpenRAIL-M, output machine-generated). " +
-                            "Tab Studio: dialog multi-suara (Supertonic) + ekspor SRT.\n\n" +
+                            "Tab Studio: dialog multi-suara multi-engine (Supertonic / Gemini / Edge / Offline) + ekspor SRT.\n\n" +
                             "Pemakaian pribadi — tidak dijual, tanpa lisensi aktivasi, tanpa iklan.",
                         style = MaterialTheme.typography.bodySmall, color = SkTextDim
                     )

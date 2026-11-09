@@ -77,9 +77,15 @@ object AudioStore {
         return "SuaraKu_${stamp}_studio" + "_$nn.srt"
     }
 
-    /** Nama file pratinjau satu baris Studio (bukan hasil gabungan). */
+    /**
+     * Nama file pratinjau satu baris Studio (bukan hasil gabungan).
+     * Stempel sampai DETIK (v1.6.0) supaya tiap pratinjau punya path
+     * berbeda — syarat auto-play (LaunchedEffect ber-key path file):
+     * pratinjau baru dalam menit yang sama tidak boleh menimpa path
+     * pratinjau lama.
+     */
     fun studioPreviewFileName(date: Date = Date()): String {
-        val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(date)
+        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(date)
         return "SuaraKu_${stamp}_studio-preview.wav"
     }
 
