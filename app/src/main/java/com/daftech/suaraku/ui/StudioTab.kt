@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
@@ -158,6 +159,7 @@ fun StudioTab(vm: AppViewModel, controller: PlayerController) {
     Button(
         onClick = { vm.generateStudio() },
         enabled = !vm.studioGenerating && vm.studioSegments.isNotEmpty(),
+        shape = RoundedCornerShape(4.dp),
         modifier = Modifier.fillMaxWidth().height(52.dp)
     ) {
         Text("GENERATE STUDIO")
@@ -247,7 +249,7 @@ fun StudioTab(vm: AppViewModel, controller: PlayerController) {
         singleLine = true
     )
     Spacer(Modifier.height(8.dp))
-    Button(onClick = { vm.saveStudioProject() }, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+    Button(onClick = { vm.saveStudioProject() }, shape = RoundedCornerShape(4.dp), modifier = Modifier.fillMaxWidth().height(52.dp)) {
         Icon(Icons.Filled.Folder, contentDescription = null)
         Spacer(Modifier.width(6.dp))
         Text("SIMPAN PROYEK STUDIO")

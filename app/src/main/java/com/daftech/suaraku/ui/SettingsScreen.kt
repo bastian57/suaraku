@@ -1,5 +1,7 @@
 package com.daftech.suaraku.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -32,9 +34,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.daftech.suaraku.Prefs
 
@@ -58,15 +62,25 @@ fun SettingsScreen(onBack: () -> Unit) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Pengaturan", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Kembali", tint = SkText)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = SkBg, titleContentColor = SkText)
-            )
+            Column {
+                TopAppBar(
+                    title = {
+                        Text(
+                            "PENGATURAN",
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 2.sp
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.Filled.ArrowBack, contentDescription = "Kembali", tint = SkText)
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = SkBg, titleContentColor = SkText)
+                )
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(SkCyan.copy(alpha = 0.35f)))
+            }
         },
         containerColor = SkBg
     ) { padding ->
@@ -132,7 +146,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                     Text("Tentang", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "SuaraKu v1.6.0 (versionCode 7)\nby DAFTECH\n\n" +
+                        "SuaraKu v1.7.0 (versionCode 8)\nby DAFTECH\n\n" +
                             "Aplikasi text-to-voice pribadi: Gemini Ekspresif (online, key sendiri), " +
                             "Edge Gratis (tidak resmi, bisa berubah), Offline (Piper AI di HP / TTS sistem), " +
                             "dan Supertonic (AI) — Supertonic 3 Bahasa Indonesia, 10 suara, model diunduh on-demand (OpenRAIL-M, output machine-generated). " +

@@ -4,7 +4,10 @@ import android.content.Intent
 import android.media.MediaPlayer
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -57,11 +60,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.daftech.suaraku.Prefs
 import com.daftech.suaraku.audio.AudioStore
@@ -149,14 +155,18 @@ class PlayerController {
 @Composable
 fun AudioPlayerBar(controller: PlayerController, file: File, modifier: Modifier = Modifier) {
     val active = controller.currentPath == file.absolutePath
-    Card(modifier = modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = SkSurface)) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = SkSurface),
+        border = if (active) BorderStroke(1.dp, SkCyan.copy(alpha = 0.45f)) else SkNeonBorder
+    ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { controller.toggle(file) }) {
                     Icon(
                         if (active && controller.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                         contentDescription = "Putar/Jeda",
-                        tint = SkGold
+                        tint = SkCyan
                     )
                 }
                 Column(modifier = Modifier.weight(1f)) {
@@ -187,15 +197,16 @@ private fun fmtTime(ms: Int): String {
 }
 
 /**
- * Judul seksi (v1.6.0, polish UI): satu gaya untuk semua tab — teks
- * titleMedium tebal + spasi 8dp sesudahnya. Dipakai GeneratorTab,
- * HistoryTab, ProjectsTab, StudioTab, dan SettingsScreen supaya jarak
- * dan tipografi konsisten (sebelumnya tiap tab memakai Spacer 6/8/10/14
- * yang berbeda-beda).
+ * Judul seksi (v1.6.0, polish UI; v1.7.0 HUD cyberpunk): teks titleMedium
+ * tebal (sekarang monospace via tema) + garis neon tipis di bawahnya.
+ * Dipakai GeneratorTab, HistoryTab, ProjectsTab, StudioTab, dan
+ * SettingsScreen supaya jarak dan tipografi konsisten.
  */
 @Composable
 internal fun SectionTitle(text: String) {
-    Text(text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    Text(text.uppercase(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    Spacer(Modifier.height(4.dp))
+    Box(modifier = Modifier.fillMaxWidth().height(2.dp).background(SkCyan.copy(alpha = 0.55f)))
     Spacer(Modifier.height(8.dp))
 }
 
@@ -208,12 +219,16 @@ internal val SectionGap = 20.dp
  */
 @Composable
 internal fun EmptyStateCard(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String) {
-    Card(colors = CardDefaults.cardColors(containerColor = SkSurface), modifier = Modifier.fillMaxWidth()) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = SkSurface),
+        border = SkNeonBorder,
+        modifier = Modifier.fillMaxWidth()
+    ) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Icon(icon, contentDescription = null, tint = SkGold, modifier = Modifier.padding(bottom = 8.dp))
+            Icon(icon, contentDescription = null, tint = SkCyan, modifier = Modifier.padding(bottom = 8.dp))
             Text(text, style = MaterialTheme.typography.bodyMedium, color = SkTextDim)
         }
     }
@@ -248,15 +263,25 @@ fun MainScreen(onOpenSettings: () -> Unit) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("SuaraKu", fontWeight = FontWeight.Bold) },
-                actions = {
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Filled.Settings, contentDescription = "Pengaturan", tint = SkText)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = SkBg, titleContentColor = SkText)
-            )
+            Column {
+                TopAppBar(
+                    title = {
+                        Text(
+                            "SUARAKU",
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 2.sp
+                        )
+                    },
+                    actions = {
+                        IconButton(onClick = onOpenSettings) {
+                            Icon(Icons.Filled.Settings, contentDescription = "Pengaturan", tint = SkText)
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = SkBg, titleContentColor = SkText)
+                )
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(SkCyan.copy(alpha = 0.35f)))
+            }
         },
         bottomBar = {
             NavigationBar(containerColor = SkSurface) {
@@ -296,7 +321,7 @@ fun MainScreen(onOpenSettings: () -> Unit) {
             }
             Spacer(Modifier.height(12.dp))
             Text(
-                "SuaraKu v1.6.0 — by DAFTECH • pemakaian pribadi",
+                "SuaraKu v1.7.0 — by DAFTECH • pemakaian pribadi",
                 style = MaterialTheme.typography.bodySmall, color = SkTextDim
             )
         }
@@ -595,6 +620,7 @@ private fun GeneratorTab(vm: AppViewModel, controller: PlayerController, onImpor
     Button(
         onClick = { vm.generate() },
         enabled = !vm.generating && !vm.batchRunning,
+        shape = RoundedCornerShape(4.dp),
         modifier = Modifier.fillMaxWidth().height(52.dp)
     ) {
         Icon(if (vm.generating) Icons.Filled.Refresh else Icons.Filled.Mic, contentDescription = null)
@@ -703,7 +729,7 @@ private fun BatchSection(vm: AppViewModel, controller: PlayerController) {
                         Text(
                             batchStatusLabel(item.status),
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (item.status == BatchStatus.FAILED) MaterialTheme.colorScheme.error else SkGold
+                            color = if (item.status == BatchStatus.FAILED) MaterialTheme.colorScheme.error else SkCyan
                         )
                     }
                     Spacer(Modifier.height(4.dp))
@@ -780,7 +806,7 @@ private fun ProjectsTab(vm: AppViewModel) {
         singleLine = true
     )
     Spacer(Modifier.height(8.dp))
-    Button(onClick = { vm.saveCurrentProject() }, modifier = Modifier.fillMaxWidth()) {
+    Button(onClick = { vm.saveCurrentProject() }, shape = RoundedCornerShape(4.dp), modifier = Modifier.fillMaxWidth()) {
         Icon(Icons.Filled.Folder, contentDescription = null)
         Spacer(Modifier.width(6.dp))
         Text("SIMPAN PROYEK INI")
